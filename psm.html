@@ -1,0 +1,587 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PSM · TV</title>
+<style>
+  /* TV-Fassung 16:9 (1920 × 1080, skaliert bis 4K). Farbcode wie Stationstafeln v2:
+     Strom rot, Spannung blau, Feld grün, Kraft schwarz, Bewegung grau. Design HTL-Grün, Rot nie als Designfarbe. */
+  :root {
+    --green: #9CCE2B; --green-dark: #6D9037; --grey: #595B60; --ink: #1F2124;
+    --line: #D8DBD3; --tint: #F5FAEA; --fans: #F3F4F1;
+    --cur: #D7261E; --volt: #1F5FBF; --fld: #2E9B3A; --frc: #000000; --move: #595B60;
+    --nord: #4A4D52; --sued: #CDD1D6; --cu: #B8733A;
+  }
+  html, body { margin: 0; height: 100%; background: #fff; overflow: hidden; }
+  body { font-family: "Segoe UI", Arial, sans-serif; color: var(--ink); user-select: none; -webkit-user-select: none; }
+  body.idle { cursor: none; }
+  #tv { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  .kick { font: 600 32px Bahnschrift, "Roboto Condensed", "sans-serif-condensed", "Segoe UI", sans-serif; letter-spacing: .09em; fill: var(--green-dark); }
+  .head { font: 700 80px Bahnschrift, "Roboto Condensed", "sans-serif-condensed", "Segoe UI", sans-serif; fill: var(--ink); }
+  .brand { font: 700 40px Bahnschrift, "Roboto Condensed", "sans-serif-condensed", "Segoe UI", sans-serif; fill: var(--ink); }
+  .brand2 { font: 28px "Segoe UI", Arial, sans-serif; fill: var(--grey); }
+  .capn { font: 700 40px Bahnschrift, "Roboto Condensed", "sans-serif-condensed", "Segoe UI", sans-serif; fill: var(--green-dark); }
+  .capt { font: 600 56px Bahnschrift, "Roboto Condensed", "sans-serif-condensed", "Segoe UI", sans-serif; fill: var(--ink); transition: opacity .3s; }
+  .lab { font: 40px "Segoe UI", Arial, sans-serif; fill: var(--ink); }
+  .labb { font: 700 40px "Segoe UI", Arial, sans-serif; fill: var(--ink); }
+  .labs { font: 32px "Segoe UI", Arial, sans-serif; fill: var(--grey); }
+  .math { font: italic 66px "Cambria Math", Cambria, "Times New Roman", serif; fill: var(--ink); }
+  .vI, .vB, .vF { font: italic 700 64px "Cambria Math", Cambria, serif; paint-order: stroke; stroke: #fff; stroke-width: 12px; stroke-linejoin: round; }
+  .vI { fill: var(--cur); } .vB { fill: var(--fld); } .vF { fill: #000; }
+  .pole { font: 700 56px Bahnschrift, "Roboto Condensed", "sans-serif-condensed", "Segoe UI", sans-serif; }
+  .legend { font: 30px "Segoe UI", Arial, sans-serif; fill: var(--grey); }
+  .fade { transition: opacity .3s; }
+  #pause { display: none; }
+  body.paused:not(.shot):not(.tv) #pause { display: inline; }   /* in tv.html zeigt die Playlist die Pause an */
+</style>
+</head>
+<body>
+<svg id="tv" viewBox="0 0 1920 1080" preserveAspectRatio="xMidYMid meet" aria-label="PSM · TV">
+  <rect width="1920" height="1080" fill="#fff"/>
+  <rect x="60" y="40" width="124" height="124" rx="26" fill="#9CCE2B"/>
+  <text x="122" y="131" text-anchor="middle" style="font:700 86px Bahnschrift,'Roboto Condensed','sans-serif-condensed','Segoe UI',sans-serif;fill:#1F2124">5</text>
+  <text x="214" y="80" class="kick">PERMANENTMAGNETERREGTE SYNCHRONMASCHINE (PSM) · STATION 5</text>
+  <text x="210" y="156" class="head">Drehfeld und Dauermagnet</text>
+  <text id="brand" x="1860" y="96" text-anchor="end" class="brand">HTL St. Pölten</text>
+  <rect id="brandSq" x="1560" y="66" width="30" height="30" rx="6" fill="#9CCE2B"/>
+  <text x="1860" y="136" text-anchor="end" class="brand2">Abteilung Elektrotechnik</text>
+  <rect x="60" y="190" width="1800" height="9" fill="#9CCE2B"/>
+  <circle cx="98" cy="262" r="34" fill="none" stroke="#6D9037" stroke-width="6"/>
+  <text id="capn" x="98" y="276" text-anchor="middle" class="capn"></text>
+  <text id="capt" x="156" y="282" class="capt"></text>
+  <g id="stage"></g>
+  <g id="legend"></g>
+  <rect x="60" y="1060" width="1800" height="8" rx="4" fill="#F3F4F1"/>
+  <rect id="progbar" x="60" y="1060" width="0" height="8" rx="4" fill="#9CCE2B"/>
+  <g id="progticks"></g>
+  <g id="pause"><rect x="1636" y="226" width="224" height="72" rx="36" fill="#1F2124" opacity=".85"/>
+    <rect x="1668" y="246" width="10" height="32" rx="2" fill="#fff"/><rect x="1686" y="246" width="10" height="32" rx="2" fill="#fff"/>
+    <text x="1712" y="275" style="font:600 36px Bahnschrift,'Roboto Condensed','sans-serif-condensed','Segoe UI',sans-serif;fill:#fff">Pause</text></g>
+</svg>
+<script>
+"use strict";
+/* ================= Hilfsfunktionen ================= */
+const NS = "http://www.w3.org/2000/svg";
+const $ = id => document.getElementById(id);
+function el(parent, tag, attrs, text) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (text != null) e.textContent = text;
+  parent.appendChild(e);
+  return e;
+}
+const f1 = v => (Math.round(v * 10) / 10).toString();
+const pts = a => a.map(p => f1(p[0]) + "," + f1(p[1])).join(" ");
+const poly = a => "M" + a.map(p => f1(p[0]) + "," + f1(p[1])).join("L") + "Z";
+const PI = Math.PI, rad = d => d * PI / 180;
+const smooth = x => (x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x));
+const clamp01 = x => Math.max(0, Math.min(1, x));
+const ramp = (a, b, t0, t1, t) => a + (b - a) * smooth((t - t0) / (t1 - t0));
+/* Pfeil als gefüllte Fläche: Schaftbreite w, Spitzenbreite hw, Spitzenlänge hl */
+function arrowD(x1, y1, x2, y2, w, hw, hl) {
+  const dx = x2 - x1, dy = y2 - y1, L = Math.hypot(dx, dy) || 1, ux = dx / L, uy = dy / L, nx = -uy, ny = ux;
+  hl = Math.min(hl, L * 0.7);
+  const bx = x2 - ux * hl, by = y2 - uy * hl;
+  return poly([[x1 + nx * w / 2, y1 + ny * w / 2], [bx + nx * w / 2, by + ny * w / 2], [bx + nx * hw / 2, by + ny * hw / 2], [x2, y2],
+               [bx - nx * hw / 2, by - ny * hw / 2], [bx - nx * w / 2, by - ny * w / 2], [x1 - nx * w / 2, y1 - ny * w / 2]]);
+}
+/* kleine Pfeilspitze an (x, y) in Richtung (dx, dy) */
+function headD(x, y, dx, dy, len, wid) {
+  const L = Math.hypot(dx, dy) || 1, ux = dx / L, uy = dy / L, nx = -uy, ny = ux;
+  return poly([[x + ux * len / 2, y + uy * len / 2], [x - ux * len / 2 + nx * wid / 2, y - uy * len / 2 + ny * wid / 2], [x - ux * len / 2 - nx * wid / 2, y - uy * len / 2 - ny * wid / 2]]);
+}
+/* Symbole für Strom senkrecht zur Bildebene: ⊗ hinein, ⊙ heraus */
+function crossD(x, y, r) { const a = r * 0.62; return `M${f1(x - a)},${f1(y - a)}L${f1(x + a)},${f1(y + a)}M${f1(x + a)},${f1(y - a)}L${f1(x - a)},${f1(y + a)}`; }
+/* Legende unten: [Art, Text]; Art = cur | volt | fld | frc | move */
+function legend(items) {
+  const g = $("legend"); let x = 60;
+  const col = { cur: "#D7261E", volt: "#1F5FBF", fld: "#2E9B3A", frc: "#000", frc0: "#fff", move: "#595B60" };
+  for (const [k, txt] of items) {
+    const f = k === "frc" || k === "frc0", w = f ? 9 : 5, c = col[k];   // frc0: hohler Kraftpfeil (Gegenkraft)
+    el(g, "path", { d: arrowD(x, 1028, x + 64, 1028, w, f ? 26 : 20, f ? 24 : 18), fill: c,
+                    ...(k === "frc0" ? { stroke: "#000", "stroke-width": 3, "stroke-linejoin": "round" } : {}) });
+    const t = el(g, "text", { x: x + 78, y: 1039, class: "legend" }, txt);
+    x += 78 + txt.length * 15 + 56;
+  }
+}
+/* Rechenqualität: 1 = volle Auflösung. Auf langsamen Geräten (z. B. Android-TV) setzt der Player QUAL bis auf 2 hoch,
+   dann rechnen Höhenlinien und Feldpfeile auf einem gröberen Raster (etwa ein Viertel der Rechenzeit). */
+let QUAL = 1;
+/* Höhenlinien (Marching Squares) einer Funktion F(x, y) auf dem Raster h; levels aufsteigend sortiert.
+   Liefert einen Pfad aus Einzelstrecken (mit runden Linienenden sieht das wie durchgehende Linien aus).
+   Optional: Vpre = schon berechnete Rasterwerte (Zeile für Zeile, (nx+1)·(ny+1) Werte). */
+function contourPath(F, x0, y0, x1, y1, h, levels, Vpre) {
+  if (!Vpre) h *= QUAL;
+  const nx = Math.ceil((x1 - x0) / h), ny = Math.ceil((y1 - y0) / h), W = nx + 1;
+  const V = Vpre || new Float64Array(W * (ny + 1));
+  if (!Vpre) for (let j = 0; j <= ny; j++) for (let i = 0; i <= nx; i++) V[j * W + i] = F(x0 + i * h, y0 + j * h);
+  // schnelle Fassung (wichtig für langsame Geräte): keine Hilfsfunktionen und Arrays pro Zelle, Text direkt anhängen
+  let out = "";
+  const nL = levels.length, r = v => Math.round(v * 10) / 10;
+  const seg = (ax, ay, bx, by) => { out += "M" + r(ax) + "," + r(ay) + "L" + r(bx) + "," + r(by); };
+  for (let j = 0; j < ny; j++) {
+    const Y = y0 + j * h, row = j * W;
+    for (let i = 0; i < nx; i++) {
+      const a = V[row + i], b = V[row + i + 1], c = V[row + W + i + 1], d = V[row + W + i];
+      const mn = Math.min(a, b, c, d), mx = Math.max(a, b, c, d);
+      if (!isFinite(mn) || !isFinite(mx)) continue;
+      let lo = 0, hi = nL;
+      while (lo < hi) { const m = (lo + hi) >> 1; if (levels[m] < mn) lo = m + 1; else hi = m; }
+      if (lo >= nL || levels[lo] > mx) continue;
+      const X = x0 + i * h;
+      for (let k = lo; k < nL && levels[k] <= mx; k++) {
+        const L = levels[k];
+        const code = (a > L ? 8 : 0) | (b > L ? 4 : 0) | (c > L ? 2 : 0) | (d > L ? 1 : 0);
+        if (code === 0 || code === 15) continue;
+        // Schnittpunkte auf den Kanten oben (a–b), rechts (b–c), unten (d–c), links (a–d)
+        switch (code) {
+          case 1: case 14: seg(X, Y + h * (L - a) / (d - a), X + h * (L - d) / (c - d), Y + h); break;
+          case 2: case 13: seg(X + h * (L - d) / (c - d), Y + h, X + h, Y + h * (L - b) / (c - b)); break;
+          case 3: case 12: seg(X, Y + h * (L - a) / (d - a), X + h, Y + h * (L - b) / (c - b)); break;
+          case 4: case 11: seg(X + h * (L - a) / (b - a), Y, X + h, Y + h * (L - b) / (c - b)); break;
+          case 6: case 9: seg(X + h * (L - a) / (b - a), Y, X + h * (L - d) / (c - d), Y + h); break;
+          case 7: case 8: seg(X, Y + h * (L - a) / (d - a), X + h * (L - a) / (b - a), Y); break;
+          case 5: seg(X, Y + h * (L - a) / (d - a), X + h * (L - a) / (b - a), Y);
+                  seg(X + h * (L - d) / (c - d), Y + h, X + h, Y + h * (L - b) / (c - b)); break;
+          case 10: seg(X + h * (L - a) / (b - a), Y, X + h, Y + h * (L - b) / (c - b));
+                   seg(X, Y + h * (L - a) / (d - a), X + h * (L - d) / (c - d), Y + h); break;
+        }
+      }
+    }
+  }
+  return out;
+}
+/* Kreuzungspunkte einer Höhenlinie mit einer Strecke (für Feldpfeile) */
+function crossings(F, p0, p1, n, levels) {
+  n = Math.max(20, Math.round(n / QUAL));
+  const res = []; let prev = F(p0[0], p0[1]);
+  for (let s = 1; s <= n; s++) {
+    const x = p0[0] + (p1[0] - p0[0]) * s / n, y = p0[1] + (p1[1] - p0[1]) * s / n, v = F(x, y);
+    for (const L of levels) if ((prev - L) * (v - L) < 0) {
+      const q = (L - prev) / (v - prev), xs = x - (p1[0] - p0[0]) / n * (1 - q), ys = y - (p1[1] - p0[1]) / n * (1 - q);
+      res.push([xs, ys]);
+    }
+    prev = v;
+  }
+  return res;
+}
+/* Wie contourPath, aber die Einzelstrecken werden zu durchgehenden Linien verkettet (nötig für Strichlierung) */
+function contourPolylines(F, x0, y0, x1, y1, h, levels, Vpre) {
+  const raw = contourPath(F, x0, y0, x1, y1, h, levels, Vpre);
+  const segs = [], ends = new Map();
+  const re = /M([-\d.]+),([-\d.]+)L([-\d.]+),([-\d.]+)/g; let m;
+  while ((m = re.exec(raw))) {
+    const a = m[1] + "," + m[2], b = m[3] + "," + m[4], i = segs.length;
+    segs.push([a, b, false]);
+    for (const k of [a, b]) { if (!ends.has(k)) ends.set(k, []); ends.get(k).push(i); }
+  }
+  const out = [];
+  const nextFrom = (k, skip) => { for (const j of ends.get(k) || []) if (!segs[j][2] && j !== skip) return j; return -1; };
+  for (let i = 0; i < segs.length; i++) {
+    if (segs[i][2]) continue;
+    segs[i][2] = true;
+    const line = [segs[i][0], segs[i][1]];
+    for (const dir of [1, 0]) {                 // erst nach vorn, dann nach hinten verlängern
+      let k = dir ? line[line.length - 1] : line[0], j;
+      while ((j = nextFrom(k, -1)) >= 0) {
+        segs[j][2] = true;
+        const nk = segs[j][0] === k ? segs[j][1] : segs[j][0];
+        if (dir) line.push(nk); else line.unshift(nk);
+        k = nk;
+      }
+    }
+    out.push("M" + line.join("L"));
+  }
+  return out.join("");
+}
+
+/* ================= Ablauf ================= */
+const LOOP = 52.5;
+const PH = [
+  { t: 0,    txt: "Drei Spulen U, V, W – drei Ströme, je 120° versetzt" },
+  { t: 6,    txt: "Das Statorfeld dreht sich im Uhrzeigersinn" },
+  { t: 13,   txt: "Dazu das Feld des Dauermagneten: Er läuft synchron mit" },
+  { t: 20,   txt: "Zeit angehalten: Ohne Last zeigt der Rotor ins Statorfeld" },
+  { t: 23.5, txt: "Halbe Last: Der Rotor bleibt um ϑ = 15° zurück" },
+  { t: 28.5, txt: "Volle Last: ϑ = 30°, die Feldlinien ziehen schräg" },
+  { t: 33.5, txt: "Zeit läuft weiter: synchron, aber um ϑ versetzt" },
+  { t: 39.5, txt: "Mehr Frequenz – schneller: n = 60 · f / p" },
+  { t: 46.5, txt: "Frequenz auf null – der Motor bleibt stehen" },
+];
+const FR0 = 20, FR1 = 33.5;                             // Zeit angehalten (Gedankenexperiment)
+/* Frequenz am Umrichter (Hz); gezeigt wird in Zeitlupe (SLOW-fach langsamer) */
+const SLOW = 25;
+function fAt(t) {
+  if (t < 0.5) return 0;
+  if (t < 3) return ramp(0, 5, 0.5, 3, t);
+  if (t < 39.5) return 5;
+  if (t < 41) return ramp(5, 15, 39.5, 41, t);          // länger bei niedriger, kurz bei hoher Drehzahl
+  if (t < 42.5) return 15;
+  if (t < 43.7) return ramp(15, 30, 42.5, 43.7, t);
+  if (t < 44.9) return 30;
+  if (t < 45.9) return ramp(30, 50, 44.9, 45.9, t);
+  if (t < 46.7) return 50;
+  if (t < 49.5) return ramp(50, 0, 46.7, 49.5, t);
+  return 0;
+}
+/* Zeitfaktor: 1 = Zeit läuft, 0 = angehalten (kurz weich ein- und ausgeblendet) */
+const warp = t => (t < FR0 - 0.4 ? 1 : t < FR0 ? 1 - smooth((t - FR0 + 0.4) / 0.4) : t < FR1 ? 0 : smooth((t - FR1) / 0.4));
+/* Polradwinkel (Grad): Drehmoment M = M_k · sin ϑ; volle Last = halbes Kippmoment → ϑ = 30°.
+   Die Last wird bei angehaltener Zeit erhöht: Das Statorfeld steht, der Rotor fällt zurück. */
+function thetaL(t) {
+  if (t < 24) return 0;
+  if (t < 25.5) return ramp(0, 15, 24, 25.5, t);
+  if (t < 29) return 15;
+  if (t < 30.5) return ramp(15, 30, 29, 30.5, t);
+  if (t < 49) return 30;
+  return ramp(30, 0, 49, 51.5, t);
+}
+/* elektrischer Winkel ωt; über die Schleife auf ganze Umläufe gerundet → nahtlos */
+const DT = 0.005, NT = Math.round(LOOP / DT) + 1, TH = new Float64Array(NT);
+(() => {
+  for (let i = 1; i < NT; i++) { const t = (i - 0.5) * DT; TH[i] = TH[i - 1] + 2 * PI * fAt(t) * warp(t) / SLOW * DT; }
+  const k = Math.round(TH[NT - 1] / (2 * PI)) * 2 * PI / TH[NT - 1];
+  for (let i = 0; i < NT; i++) TH[i] *= k;
+})();
+const thAt = t => { const x = Math.max(0, Math.min(NT - 1.001, t / DT)), i = Math.floor(x); return TH[i] + (TH[i + 1] - TH[i]) * (x - i); };
+
+/* Spulen wie Tafel 5 (von oben gesehen): U oben, V rechts unten, W links unten.
+   i_U = cos ωt, i_V = cos(ωt − 120°), i_W = cos(ωt − 240°). Positiver Strom: Feld zeigt von der Spule weg (zur Mitte). */
+const PHS = [
+  { n: "U", ph: 0,          a: 90,  col: "#D7261E" },
+  { n: "V", ph: 2 * PI / 3, a: -30, col: "#7A1712" },
+  { n: "W", ph: 4 * PI / 3, a: 210, col: "#EE8A84" },
+];
+
+/* ================= Feldberechnung (ebenes Feld, Blick von oben) =================
+   Vektorpotential A (z-Komponente), Feldlinien = Höhenlinien, B = (∂A/∂Y, −∂A/∂X).
+   Stator: Zahnspulenwicklung (q = ½, wie bei Nabenmotoren): drei breite Spulen U, V, W über je 120° Bogen.
+   Die Spulenseiten liegen in Nuten nahe am Luftspalt (je 9 Stromfäden bei a ± 50° ± 10°). Bei i > 0 fließt der Strom
+   auf der Seite a − 50° aus der Ebene heraus (⊙), auf der Seite a + 50° hinein (⊗) → Feld von der Spule weg zur Mitte.
+   Rotor: homogen magnetisierter Zylinder (Radius RR), innen homogenes Feld in Richtung des Nordpols, außen Dipolfeld. */
+const CX = 560, CY = 665, RR = 118, RB = 215, DEL = 50, SPR = 10, RS1 = 260, RS2 = 320;
+const FIL = PHS.map(c => {
+  const o = [];
+  for (const r of [RS1, (RS1 + RS2) / 2, RS2]) for (const d of [-SPR, 0, SPR]) for (const [ang, s] of [[c.a - DEL + d, 1], [c.a + DEL + d, -1]])
+    o.push([r * Math.cos(rad(ang)), r * Math.sin(rad(ang)), s / 9]);
+  return o;
+});
+const gPhase = (k, X, Y) => { let A = 0; for (const [x, y, s] of FIL[k]) A -= s * 0.5 * Math.log((X - x) * (X - x) + (Y - y) * (Y - y)); return A; };
+const aStat = (X, Y, cur) => cur[0] * gPhase(0, X, Y) + cur[1] * gPhase(1, X, Y) + cur[2] * gPhase(2, X, Y);
+const aRot = (X, Y, psi, kap) => kap * (Math.cos(psi) * Y - Math.sin(psi) * X) / Math.max(X * X + Y * Y, RR * RR);
+/* Raster der Bohrung einmal vorausberechnen: Feld jeder Phase bei Strom 1 */
+const GH = 6, GN = Math.ceil(2 * RB / GH), GW = GN + 1, GX0 = CX - RB, GY0 = CY - RB;
+const GK = [0, 1, 2].map(k => { const a = new Float64Array(GW * GW); for (let j = 0; j < GW; j++) for (let i = 0; i < GW; i++) a[j * GW + i] = gPhase(k, GX0 + i * GH - CX, CY - GY0 - j * GH); return a; });
+const GIN = []; for (let j = 0; j < GW; j++) for (let i = 0; i < GW; i++) if ((i * GH - RB) ** 2 + (j * GH - RB) ** 2 <= RB * RB) GIN.push(j * GW + i);
+const GV = new Float64Array(GW * GW);
+/* Eichung: Statorfeld in der Mitte bei ωt = 0 */
+const S0 = (() => { const c = [1, -0.5, -0.5], e = 0.5; return Math.hypot((aStat(0, e, c) - aStat(0, -e, c)) / (2 * e), (aStat(e, 0, c) - aStat(-e, 0, c)) / (2 * e)); })();
+const KAP = 1.15 * S0 * RR * RR, DA = 43 * S0;                                  // Rotorfeld innen ≈ 1,15 × Statorfeld; Linienabstand
+
+/* ================= Bühne: Motor ================= */
+const st = $("stage");
+const P = (r, deg) => [CX + r * Math.cos(rad(deg)), CY - r * Math.sin(rad(deg))];
+const sector = (r1, r2, a1, a2) => { const p1 = P(r2, a1), p2 = P(r2, a2), p3 = P(r1, a2), p4 = P(r1, a1);
+  return `M${f1(p1[0])},${f1(p1[1])}A${r2},${r2} 0 0 0 ${f1(p2[0])},${f1(p2[1])}L${f1(p3[0])},${f1(p3[1])}A${r1},${r1} 0 0 1 ${f1(p4[0])},${f1(p4[1])}Z`; };
+el(st, "text", { x: 60, y: 350, class: "labs" }, "Von oben gesehen");
+const defs = el(st, "defs", {});
+const cp = el(defs, "clipPath", { id: "bore" }); el(cp, "circle", { cx: CX, cy: CY, r: RB });
+el(st, "circle", { cx: CX, cy: CY, r: RB, fill: "#F5FAEA", stroke: "#D8DBD3", "stroke-width": 3 });
+const coils = PHS.map(c => {
+  el(st, "path", { d: sector(250, 330, c.a - DEL - SPR, c.a + DEL + SPR), fill: "#B8733A", "fill-opacity": .14, stroke: "#7A4A22", "stroke-width": 3 });
+  const sides = [-1, 1].map(sg => {
+    const a0 = c.a + sg * DEL;
+    el(st, "path", { d: sector(252, 328, a0 - SPR, a0 + SPR), fill: "#B8733A", stroke: "#7A4A22", "stroke-width": 2 });
+    const glow = el(st, "path", { d: sector(252, 328, a0 - SPR, a0 + SPR), fill: "#D7261E", opacity: 0 });
+    const [x, y] = P(290, a0);
+    const g = el(st, "g", { transform: `translate(${f1(x)} ${f1(y)})` });
+    el(g, "circle", { r: 24, fill: "#fff", stroke: "#D7261E", "stroke-width": 4 });
+    return { glow, g, m: el(g, "g", {}), out: sg < 0 };        // Seite a − 50°: bei i > 0 aus der Ebene (⊙)
+  });
+  const [lx, ly] = P(295, c.a);
+  el(st, "text", { x: f1(lx), y: f1(ly + 22), "text-anchor": "middle", style: `font:700 60px Bahnschrift,'Roboto Condensed','sans-serif-condensed','Segoe UI',sans-serif;fill:${c.col};paint-order:stroke;stroke:#fff;stroke-width:10px` }, c.n);
+  return sides;
+});
+const rotorG = el(st, "g", {});
+const rotorIn = el(rotorG, "g", {});
+el(rotorIn, "path", { d: `M0,${-RR}A${RR},${RR} 0 0 1 0,${RR}Z`, fill: "#4A4D52", opacity: .6 });
+el(rotorIn, "path", { d: `M0,${-RR}A${RR},${RR} 0 0 0 0,${RR}Z`, fill: "#CDD1D6", opacity: .8 });
+el(rotorIn, "circle", { r: RR, fill: "none", stroke: "#1F2124", "stroke-width": 3 });
+/* Statorfeld allein: gestrichelt in hellerem Grün hinter dem Gesamtfeld */
+const SCOL = "#7CC487";
+const ghostG = el(st, "g", { "clip-path": "url(#bore)" });
+const ghostP = el(ghostG, "path", { fill: "none", stroke: SCOL, "stroke-width": 5, "stroke-dasharray": "14 10", "stroke-linecap": "round" });
+const fieldG = el(st, "g", { "clip-path": "url(#bore)" });
+const linesP = el(fieldG, "path", { fill: "none", stroke: "#2E9B3A", "stroke-width": 5, "stroke-linecap": "round" });
+const headsP = el(fieldG, "path", { fill: "#2E9B3A" });
+const poleG = el(st, "g", {});
+const rN = el(poleG, "text", { class: "pole", "text-anchor": "middle", style: "fill:#fff;paint-order:stroke;stroke:#4A4D52;stroke-width:8px" }, "N");
+const rS = el(poleG, "text", { class: "pole", "text-anchor": "middle", style: "fill:#1F2124;paint-order:stroke;stroke:#CDD1D6;stroke-width:8px" }, "S");
+el(poleG, "circle", { cx: CX, cy: CY, r: 14, fill: "#fff", stroke: "#1F2124", "stroke-width": 4 });
+/* Zeiger: Richtung des Statorfelds (gestrichelt, hellgrün) und Nordpol des Rotors (schwarz), dazwischen ϑ */
+/* Statorfeld: Richtungspfeil durch die Bohrung und mitlaufende Pole N, S am Stator
+   (Feld tritt bei β + 180° aus dem Stator aus = Nordpol, bei β wieder ein = Südpol) */
+const statG = el(st, "g", {});
+const statArr = el(statG, "path", { fill: SCOL, stroke: "#2E9B3A", "stroke-width": 3, opacity: .9 });
+const stN = el(statG, "g", {}), stS = el(statG, "g", {});
+el(stN, "circle", { r: 32, fill: "#4A4D52", stroke: "#fff", "stroke-width": 3 }); el(stN, "text", { y: 17, "text-anchor": "middle", style: "font:700 50px Bahnschrift,'Roboto Condensed','sans-serif-condensed','Segoe UI',sans-serif;fill:#fff" }, "N");
+el(stS, "circle", { r: 32, fill: "#CDD1D6", stroke: "#fff", "stroke-width": 3 }); el(stS, "text", { y: 17, "text-anchor": "middle", style: "font:700 50px Bahnschrift,'Roboto Condensed','sans-serif-condensed','Segoe UI',sans-serif;fill:#1F2124" }, "S");
+const lagG = el(st, "g", {});
+const axR = el(lagG, "line", { stroke: "#1F2124", "stroke-width": 7 });
+const axRH = el(lagG, "path", { fill: "#1F2124" });
+const lagArc = el(lagG, "path", { fill: "none", stroke: "#1F2124", "stroke-width": 6 });
+const lagLab = el(lagG, "text", { "text-anchor": "middle", style: "font:italic 700 66px 'Cambria Math',Cambria,serif;fill:#1F2124;paint-order:stroke;stroke:#fff;stroke-width:12px" }, "ϑ");
+const lagLeg = el(st, "g", {});
+const statLeg = el(st, "g", {});
+el(statLeg, "path", { d: arrowD(60, 392, 120, 392, 12, 30, 24), fill: SCOL, stroke: "#2E9B3A", "stroke-width": 2 });
+el(statLeg, "text", { x: 132, y: 402, class: "labs", style: "fill:#1F2124;font-size:30px" }, "Statorfeld");
+el(lagLeg, "line", { x1: 60, y1: 436, x2: 120, y2: 436, stroke: SCOL, "stroke-width": 7, "stroke-dasharray": "14 10" });
+el(lagLeg, "text", { x: 132, y: 446, class: "labs", style: "fill:#1F2124;font-size:30px" }, "nur Stator");
+el(lagLeg, "path", { d: arrowD(60, 480, 120, 480, 7, 24, 20), fill: "#1F2124" });
+el(lagLeg, "text", { x: 132, y: 490, class: "labs", style: "fill:#1F2124;font-size:30px" }, "Nordpol");
+/* Hinweis „Zeit angehalten“ */
+const frz = el(st, "g", {});
+el(frz, "rect", { x: 60, y: 900, width: 300, height: 70, rx: 35, fill: "#1F2124", opacity: .88 });
+el(frz, "rect", { x: 92, y: 918, width: 11, height: 34, rx: 2, fill: "#fff" });
+el(frz, "rect", { x: 111, y: 918, width: 11, height: 34, rx: 2, fill: "#fff" });
+el(frz, "text", { x: 136, y: 946, style: "font:600 32px Bahnschrift,'Roboto Condensed','sans-serif-condensed','Segoe UI',sans-serif;fill:#fff" }, "Zeit angehalten");
+const GVS = new Float64Array(GW * GW);
+const rotArc = el(st, "path", { fill: "none", stroke: "#595B60", "stroke-width": 9, "stroke-linecap": "round" });
+const rotHead = el(st, "path", { fill: "#595B60" });
+
+/* ================= Ströme ================= */
+const X0 = 1160, X1 = 1840, YC = 500, AMP = 115;
+el(st, "text", { x: 1100, y: 350, class: "labs" }, "Ströme (Zeitlupe)");
+el(st, "line", { x1: X0 - 10, y1: YC, x2: X1 + 10, y2: YC, stroke: "#9AA0A6", "stroke-width": 3 });
+el(st, "path", { d: headD(X1 + 14, YC, 1, 0, 26, 20), fill: "#9AA0A6" });
+el(st, "line", { x1: X0, y1: YC - AMP - 25, x2: X0, y2: YC + AMP + 25, stroke: "#9AA0A6", "stroke-width": 3 });
+el(st, "text", { x: X0 - 22, y: YC - AMP - 5, class: "labs", "text-anchor": "end" }, "i");
+el(st, "text", { x: X1 + 4, y: YC + 46, class: "labs", "text-anchor": "end" }, "t");
+for (const c of PHS) {
+  const p = []; for (let i = 0; i <= 240; i++) { const a = 4 * PI * i / 240; p.push([X0 + (X1 - X0) * i / 240, YC - AMP * Math.cos(a - c.ph)]); }
+  el(st, "polyline", { points: pts(p), fill: "none", stroke: c.col, "stroke-width": 6 });
+}
+PHS.forEach((c, k) => el(st, "text", { x: 1600 + k * 80, y: 350, style: `font:700 40px Bahnschrift,'Roboto Condensed','sans-serif-condensed','Segoe UI',sans-serif;fill:${c.col}` }, "i" + c.n));
+const cursor = el(st, "line", { y1: YC - AMP - 30, y2: YC + AMP + 30, stroke: "#1F2124", "stroke-width": 5 });
+const dots = el(st, "g", {});
+
+/* ================= Frequenzumrichter und Last ================= */
+el(st, "rect", { x: 1100, y: 680, width: 760, height: 320, rx: 24, fill: "#F3F4F1" });
+el(st, "text", { x: 1140, y: 734, class: "labs" }, "Frequenzumrichter");
+el(st, "text", { x: 1840, y: 734, class: "labs", "text-anchor": "end" }).innerHTML = "n = 60 · f / p   (p = 1)";
+const SX0 = 1160, SX1 = 1800, SY = 782;
+el(st, "line", { x1: SX0, y1: SY, x2: SX1, y2: SY, stroke: "#D8DBD3", "stroke-width": 16, "stroke-linecap": "round" });
+const sFill = el(st, "line", { x1: SX0, y1: SY, y2: SY, stroke: "#9CCE2B", "stroke-width": 16, "stroke-linecap": "round" });
+for (let f = 0; f <= 50; f += 10) el(st, "text", { x: SX0 + (SX1 - SX0) * f / 50, y: SY + 44, class: "labs", "text-anchor": "middle", style: "font-size:26px" }, f + (f === 50 ? " Hz" : ""));
+const knob = el(st, "circle", { cy: SY, r: 24, fill: "#fff", stroke: "#6D9037", "stroke-width": 6 });
+const fTxt = el(st, "text", { x: 1140, y: 904, style: "font:700 60px Bahnschrift,'Roboto Condensed','sans-serif-condensed','Segoe UI',sans-serif;fill:#1F2124" });
+const nTxt = el(st, "text", { x: 1840, y: 904, "text-anchor": "end", style: "font:700 60px Bahnschrift,'Roboto Condensed','sans-serif-condensed','Segoe UI',sans-serif;fill:#1F2124" });
+el(st, "text", { x: 1140, y: 966, class: "lab" }, "Last");
+el(st, "rect", { x: 1240, y: 942, width: 300, height: 26, rx: 13, fill: "#fff", stroke: "#9AA0A6", "stroke-width": 2 });
+const loadBar = el(st, "rect", { x: 1242, y: 944, width: 0, height: 22, rx: 11, fill: "#595B60" });
+const loadTxt = el(st, "text", { x: 1840, y: 968, "text-anchor": "end", style: "font:700 44px Bahnschrift,'Roboto Condensed','sans-serif-condensed','Segoe UI',sans-serif;fill:#1F2124" });
+legend([["cur", "Strom I"], ["fld", "Magnetfeld B"], ["move", "Drehrichtung"]]);
+
+/* ================= Zeichnen ================= */
+const A = {
+  reset() {}, step() {},
+  draw(t) {
+    const th = thAt(t), f = fAt(t), lag = thetaL(t);
+    const cur = PHS.map(c => Math.cos(th - c.ph));
+    // Statorfeld-Richtung: B = −Σ i_k·e_k → bei ωt = 0 nach unten, dreht im Uhrzeigersinn
+    let bx = 0, by = 0;
+    PHS.forEach((c, k) => { bx -= cur[k] * Math.cos(rad(c.a)); by -= cur[k] * Math.sin(rad(c.a)); });
+    const beta = Math.atan2(by, bx);
+    // Rotor: Nordpol in Feldrichtung, unter Last um ϑ zurück (Drehung im Uhrzeigersinn → größerer Winkel)
+    const psi = beta + rad(lag);
+    const rotA = t < 13 ? 0 : t < 13.8 ? (t - 13) / 0.8 : t < 51.5 ? 1 : 1 - (t - 51.5);   // Rotor ein- und am Schluss wieder ausblenden
+    // Spulen: Stromstärke (rot) und Richtung (⊙/⊗)
+    PHS.forEach((c, k) => {
+      const i = cur[k];
+      coils[k].forEach(s => {
+        const out = s.out === (i > 0);
+        s.glow.setAttribute("opacity", (0.6 * Math.abs(i)).toFixed(2));
+        s.g.style.opacity = (0.2 + 0.8 * Math.min(1, Math.abs(i) * 1.2)).toFixed(2);
+        s.m.innerHTML = out ? `<circle r="7" fill="#D7261E"/>` : `<path d="${crossD(0, 0, 15)}" stroke="#D7261E" stroke-width="6" stroke-linecap="round"/>`;
+      });
+    });
+    // Feldbild: Stator allein bzw. Stator + Rotor (Rotoranteil blendet ein); Raster aus den vorausberechneten Phasenfeldern
+    const kap = KAP * rotA;
+    const F = (x, y) => { const X = x - CX, Y = CY - y; return aStat(X, Y, cur) + aRot(X, Y, psi, kap); };
+    let mn = Infinity, mx = -Infinity;
+    for (let j = 0; j < GW; j++) for (let i = 0; i < GW; i++) {
+      const n = j * GW + i, X = i * GH - RB, Y = RB - j * GH;
+      GVS[n] = cur[0] * GK[0][n] + cur[1] * GK[1][n] + cur[2] * GK[2][n];
+      GV[n] = GVS[n] + (kap ? aRot(X, Y, psi, kap) : 0);
+    }
+    for (const n of GIN) { const v = GV[n]; if (v < mn) mn = v; if (v > mx) mx = v; }
+    const lv = []; for (let j = Math.floor(mn / DA) - 1; j <= Math.ceil(mx / DA) + 1 && lv.length < 80; j++) lv.push((j + 0.5) * DA);
+    linesP.setAttribute("d", contourPath(F, GX0, GY0, GX0 + GN * GH, GY0 + GN * GH, GH, lv, GV));
+    // Statorfeld allein (gestrichelt) während der Lastphasen
+    const ov = t < FR0 - 0.4 ? 0 : t < FR0 + 0.2 ? clamp01((t - FR0 + 0.4) / 0.6) : t < 39.5 ? 1 : 1 - clamp01((t - 39.5) / 0.8);
+    ghostG.style.opacity = ov * rotA;
+    if (ov > 0.01) {
+      let a = Infinity, b = -Infinity; for (const n of GIN) { const v = GVS[n]; if (v < a) a = v; if (v > b) b = v; }
+      const lvs = []; for (let j = Math.floor(a / DA) - 1; j <= Math.ceil(b / DA) + 1 && lvs.length < 80; j++) lvs.push((j + 0.5) * DA);
+      ghostP.setAttribute("d", contourPolylines(null, GX0, GY0, GX0 + GN * GH, GY0 + GN * GH, GH, lvs, GVS));
+    }
+    frz.style.opacity = t < FR0 - 0.2 ? 0 : t < FR0 + 0.2 ? clamp01((t - FR0 + 0.2) / 0.4) : t < FR1 ? 1 : 1 - clamp01((t - FR1) / 0.4);
+    // Feldpfeile auf einem Kreis im Luftspalt (höchstens 12)
+    const pr = 176, cross = [];
+    let prev = null;
+    const gv = (x, y) => { const fx = (x - GX0) / GH, fy = (y - GY0) / GH, i = Math.floor(fx), j = Math.floor(fy), u = fx - i, w = fy - j, n = j * GW + i;
+      return (GV[n] * (1 - u) + GV[n + 1] * u) * (1 - w) + (GV[n + GW] * (1 - u) + GV[n + GW + 1] * u) * w; };   // aus dem Raster interpoliert
+    for (let s = 0; s <= 720; s++) {
+      const a = 2 * PI * s / 720, x = CX + pr * Math.cos(a), y = CY - pr * Math.sin(a), v = gv(x, y);
+      if (prev) for (const L of lv) if ((prev[2] - L) * (v - L) < 0) cross.push([x, y]);
+      prev = [x, y, v];
+    }
+    const stepN = Math.max(1, Math.ceil(cross.length / 12));
+    let hd = "";
+    cross.forEach((p, n) => {
+      if (n % stepN) return;
+      const [x, y] = p, e = 0.6, bX = (F(x, y - e) - F(x, y + e)) / (2 * e), bY = -(F(x + e, y) - F(x - e, y)) / (2 * e);
+      hd += headD(x, y, bX, -bY, 30, 24);
+    });
+    headsP.setAttribute("d", hd);
+    fieldG.style.opacity = t < 4.5 ? 0 : clamp01((t - 4.5) / 1);
+    // Richtung des Statorfelds und seine Pole
+    { const ux = Math.cos(beta), uy = -Math.sin(beta), on = t < 4.5 ? 0 : clamp01((t - 4.5) / 1);
+      statG.style.opacity = on; statLeg.style.opacity = on;
+      statArr.setAttribute("d", arrowD(CX - 130 * ux, CY - 130 * uy, CX + 158 * ux, CY + 158 * uy, 14, 44, 40));
+      stN.setAttribute("transform", `translate(${f1(CX - 228 * ux)} ${f1(CY - 228 * uy)})`);
+      stS.setAttribute("transform", `translate(${f1(CX + 228 * ux)} ${f1(CY + 228 * uy)})`); }
+    // Rotor zeichnen
+    rotorIn.setAttribute("transform", `translate(${CX} ${CY}) rotate(${f1(-psi * 180 / PI)})`);
+    rN.setAttribute("x", f1(CX + 72 * Math.cos(psi + 0.85))); rN.setAttribute("y", f1(CY - 72 * Math.sin(psi + 0.85) + 20));
+    rS.setAttribute("x", f1(CX - 72 * Math.cos(psi + 0.85))); rS.setAttribute("y", f1(CY + 72 * Math.sin(psi + 0.85) + 20));
+    rotorG.style.opacity = rotA; poleG.style.opacity = rotA;
+    // Polradwinkel: Achse des Statorfelds (gestrichelt) und Rotorachse
+    lagG.style.opacity = ov * rotA;
+    lagLeg.style.opacity = ov * rotA;
+    if (ov > 0.01) {
+      const q = (ang, rr) => [CX + rr * Math.cos(ang), CY - rr * Math.sin(ang)];
+      const s0 = q(beta, 24), s1 = q(beta, 182), sh = q(beta, 196), r0 = q(psi, 24), r1 = q(psi, 182), rh = q(psi, 196);
+      axR.setAttribute("x1", f1(r0[0])); axR.setAttribute("y1", f1(r0[1])); axR.setAttribute("x2", f1(r1[0])); axR.setAttribute("y2", f1(r1[1]));
+      axRH.setAttribute("d", headD(rh[0], rh[1], Math.cos(psi), -Math.sin(psi), 40, 34));
+      const p0 = q(beta, 150), p1 = q(psi, 150), m = q(psi + 0.24, 162);   // ϑ hinter dem Rotorzeiger, nicht zwischen Zeiger und S-Pol
+      lagArc.setAttribute("d", lag > 1.5 ? `M${f1(p0[0])},${f1(p0[1])}A150,150 0 0 0 ${f1(p1[0])},${f1(p1[1])}` : "");
+      lagLab.style.opacity = clamp01((lag - 1.5) / 3);
+      lagLab.setAttribute("x", f1(m[0])); lagLab.setAttribute("y", f1(m[1] + 22));
+    }
+    // Drehrichtung (im Uhrzeigersinn) zwischen U und V
+    const sp = clamp01(f / 2);
+    rotArc.style.opacity = rotHead.style.opacity = sp;
+    { const r = 372, a0 = 58, a1 = 14, p0 = P(r, a0), p1 = P(r, a1);
+      rotArc.setAttribute("d", `M${f1(p0[0])},${f1(p0[1])}A${r},${r} 0 0 1 ${f1(p1[0])},${f1(p1[1])}`);
+      const tx = Math.sin(rad(a1)), ty = Math.cos(rad(a1));                 // Tangente im Uhrzeigersinn (Bildschirm)
+      rotHead.setAttribute("d", headD(p1[0] + tx * 14, p1[1] + ty * 14, tx, ty, 44, 40)); }
+    // Zeitmarke
+    const xc = X0 + (X1 - X0) * (((th % (4 * PI)) + 4 * PI) % (4 * PI)) / (4 * PI);
+    cursor.setAttribute("x1", f1(xc)); cursor.setAttribute("x2", f1(xc));
+    dots.innerHTML = PHS.map((c, k) => `<circle cx="${f1(xc)}" cy="${f1(YC - AMP * cur[k])}" r="13" fill="${c.col}" stroke="#fff" stroke-width="4"/>`).join("");
+    // Umrichter und Last
+    const kx = SX0 + (SX1 - SX0) * f / 50;
+    knob.setAttribute("cx", f1(kx)); sFill.setAttribute("x2", f1(Math.max(SX0, kx)));
+    fTxt.textContent = "f = " + Math.round(f) + " Hz";
+    nTxt.textContent = "n = " + Math.round(60 * f) + " 1/min";
+    const load = Math.sin(rad(lag)) / Math.sin(rad(30));
+    loadBar.setAttribute("width", f1(296 * load));
+    loadTxt.textContent = `${Math.round(load * 20) * 5} %  ·  ϑ = ${Math.round(lag)}°`;
+  }
+};
+
+/* ================= Abspielen =================
+   Allein geöffnet: Endlosschleife. Mit ?tv (eingebettet in tv.html) steuert die Playlist:
+   Befehle {cmd: "seek", t, play}, {cmd: "play"}, {cmd: "pause"}; die Animation meldet „ready“ (Dauer und Schritte),
+   beim Abspielen laufend „time“ und am Ende „done“ und bleibt dann auf dem letzten Bild stehen.
+   ?t=12 startet bei Sekunde 12, ?t=12&shot zeigt ein Standbild. */
+const Q = new URLSearchParams(location.search);
+const TVMODE = Q.has("tv");
+let T = 0, paused = Q.has("pause") || Q.has("shot") || TVMODE, last = null, capIdx = -1, dirty = true;
+if (Q.has("shot")) document.body.classList.add("shot");
+if (TVMODE) document.body.classList.add("tv");
+const tell = m => { if (TVMODE) { try { parent.postMessage(m, "*"); } catch (e) {} } };
+function phaseAt(t) { let i = 0; while (i + 1 < PH.length && t >= PH[i + 1].t) i++; return i; }
+const STEP = 1 / 240;
+function stepTo(t) { while (T < t - 1e-9) { const d = Math.min(STEP, t - T); A.step(T, d); T += d; } T = t; }
+/* Springen: vorwärts ab der aktuellen Zeit weiterrechnen, rückwärts von vorn */
+function seek(t) { if (t < T) { A.reset(); T = 0; } stepTo(t); dirty = true; }
+function advance(dt) {
+  const target = T + dt;
+  if (target >= LOOP) {
+    if (TVMODE) { stepTo(LOOP - 0.001); setPaused(true); dirty = true; tell({ tv: "done" }); return; }
+    A.reset(); T = 0; stepTo(target - LOOP); return;
+  }
+  stepTo(target);
+}
+const capN = $("capn"), capT = $("capt"), progbar = $("progbar");
+function caption(i, instant) {
+  if (i === capIdx) return; capIdx = i;
+  const set = () => { capN.textContent = i + 1; capT.textContent = PH[i].txt; capT.style.opacity = 1; };
+  if (instant) set(); else { capT.style.opacity = 0; setTimeout(set, 250); }
+}
+PH.slice(1).forEach(p => el($("progticks"), "rect", { x: f1(60 + 1800 * p.t / LOOP - 2), y: 1060, width: 4, height: 8, fill: "#fff" }));
+/* Rechenzeit pro Bild beobachten: Ist das Gerät zu langsam (über 22 ms), wird das Rechenraster gröber (QUAL bis 2),
+   bei viel Reserve (unter 7 ms) wieder feiner. Bilder ohne Neuberechnung (unter 2 ms) zählen nicht.
+   Auf einem normalen PC bleibt QUAL = 1. */
+let cost = 0, costN = 0;
+function measure(ms) {
+  if (paused || ms < 2) return;
+  cost = costN < 6 ? (cost * costN + ms) / (costN + 1) : cost * 0.85 + ms * 0.15; costN++;
+  if (costN < 8) return;
+  if (cost > 22 && QUAL < 2) { QUAL = Math.min(2, QUAL * 1.25); costN = 0; }
+  else if (cost < 7 && QUAL > 1) { QUAL = Math.max(1, QUAL / 1.25); costN = 0; }
+}
+function render(instant) {
+  caption(phaseAt(T), instant); progbar.setAttribute("width", f1(1800 * T / LOOP));
+  const a = performance.now(); A.draw(T); measure(performance.now() - a); dirty = false;
+}
+function frame(now) {
+  if (last != null && !paused) advance(Math.min(0.25, (now - last) / 1000));
+  last = now;
+  if (!paused || dirty) { render(false); if (!paused) tell({ tv: "time", t: T }); }
+  requestAnimationFrame(frame);
+}
+function setPaused(p) { paused = p; document.body.classList.toggle("paused", p); }
+function jump(k) { const i = (phaseAt(T) + k + PH.length) % PH.length; seek(PH[i].t); render(true); }
+function key(k) {
+  if (k === " " || k === "Enter") setPaused(!paused);
+  else if (k === "ArrowRight") jump(1);
+  else if (k === "ArrowLeft") jump(-1);
+}
+addEventListener("keydown", e => {
+  if (TVMODE) { tell({ tv: "key", key: e.key, code: e.keyCode }); e.preventDefault(); return; }
+  if (e.key === "f" || e.key === "F") { const d = document.documentElement; if (!document.fullscreenElement && d.requestFullscreen) d.requestFullscreen().catch(() => {}); else if (document.exitFullscreen) document.exitFullscreen(); return; }
+  key(e.key); if (e.key === " ") e.preventDefault();
+});
+addEventListener("click", () => { if (TVMODE) tell({ tv: "key", key: " " }); else setPaused(!paused); });
+addEventListener("message", e => {
+  const m = e.data || {};
+  if (m.cmd === "pause") setPaused(true);
+  else if (m.cmd === "play") { if (T >= LOOP - 0.01) { seek(0); render(true); } setPaused(false); }
+  else if (m.cmd === "seek") {
+    seek(Math.max(0, Math.min(LOOP - 0.001, +m.t || 0))); render(true); tell({ tv: "time", t: T });
+    if (m.play != null) setPaused(!m.play);
+  }
+  else if (m.cmd === "step") jump(m.dir || 1);
+});
+/* Mauszeiger nach 2 s ohne Bewegung ausblenden */
+let idleT = null;
+addEventListener("mousemove", () => { document.body.classList.remove("idle"); clearTimeout(idleT); idleT = setTimeout(() => document.body.classList.add("idle"), 2000); });
+document.body.classList.add("idle");
+/* Bildschirm wach halten, wo der Browser es erlaubt */
+async function keepAwake() { try { if (!TVMODE && "wakeLock" in navigator && document.visibilityState === "visible") await navigator.wakeLock.request("screen"); } catch (e) {} }
+document.addEventListener("visibilitychange", keepAwake); keepAwake();
+/* grünes Quadrat vor „HTL St. Pölten“ */
+try { const b = $("brand").getComputedTextLength(); $("brandSq").setAttribute("x", f1(1860 - b - 44)); } catch (e) {}
+
+seek(Math.max(0, Math.min(LOOP - 0.001, parseFloat(Q.get("t")) || 0)));
+setPaused(paused);
+render(true);
+tell({ tv: "ready", loop: LOOP, ph: PH.map(p => p.t) });
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

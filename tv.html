@@ -1,0 +1,546 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TV-Schleife · Antriebstechnik</title>
+<style>
+  /* Endlos-Playlist für den Fernseher: Videoteile und Animationen im Wechsel, mit Zeitleiste wie in einem Videoplayer.
+     Läuft im Browser (Laptop mit Edge oder direkt auf einem Android-TV). Design HTL-Grün, Rot nie als Designfarbe. */
+  :root { --green: #9CCE2B; --green-dark: #6D9037; --grey: #595B60; --ink: #1F2124; }
+  html, body { margin: 0; height: 100%; background: #fff; overflow: hidden; color: var(--ink);
+               font-family: Bahnschrift, "Roboto Condensed", "sans-serif-condensed", "Segoe UI", Roboto, Arial, sans-serif; user-select: none; -webkit-user-select: none;
+               -webkit-tap-highlight-color: transparent; }
+  body.idle { cursor: none; }
+  /* 16:9-Bühne, auf jede Bildschirmgröße eingepasst */
+  #box { position: absolute; left: 50%; top: 50%; width: min(100vw, 177.78vh); height: min(56.25vw, 100vh);
+         transform: translate(-50%, -50%); overflow: hidden; }
+  #box > * { position: absolute; left: 0; top: 0; width: 100%; height: 100%; border: 0; display: block; }
+  .layer { opacity: 0; transition: opacity .45s; pointer-events: none; }
+  .layer.show { opacity: 1; }
+  #vidwrap { background: #000; }
+  #vidwrap iframe, #yt { width: 100%; height: 100%; border: 0; display: block; }
+  body.vidklick #vidwrap { pointer-events: auto; }      /* nur wenn der Browser das Video blockiert: direkt aufs Video tippen */
+  body.vidklick #catch { pointer-events: none; }
+  #hint { opacity: 0; transition: opacity .3s; pointer-events: none; }
+  body.hint #hint { opacity: 1; }
+  #ui { opacity: 0; transition: opacity .3s; pointer-events: none; }
+  body.ui #ui { opacity: 1; }
+  body.ui #ui .hit { pointer-events: auto; cursor: pointer; }
+  #ui text { font-family: Bahnschrift, "Roboto Condensed", "sans-serif-condensed", "Segoe UI", Roboto, Arial, sans-serif; }
+  /* Über dem Video: dunkler, durchscheinender Verlauf, helle Schrift.
+     Über Titelkarten und Animationen (weißer Hintergrund, Klasse uilight): heller Schleier, dunkle Schrift,
+     damit Legende und Beschriftungen der Animation nicht mit der Leiste durcheinanderlaufen. */
+  #shadeDark, #shadeLight { transition: opacity .3s; }
+  #shadeLight { opacity: 0; }
+  body.uilight #shadeLight { opacity: 1; }
+  body.uilight #shadeDark { opacity: 0; }
+  .btn .bg { fill: #14161A; fill-opacity: .45; stroke: #fff; stroke-opacity: .35; stroke-width: 1.5; transition: fill-opacity .2s; }
+  .btn:hover .bg { fill-opacity: .7; }
+  #bPlay .bg { fill-opacity: .6; }
+  .ico { fill: #fff; }
+  .icoS { stroke: #fff; }
+  .ol { paint-order: stroke; stroke: #14161A; stroke-opacity: .55; stroke-width: 4px; stroke-linejoin: round; }   /* feine Kontur, falls das Video hell ist */
+  .tx { fill: #fff; }
+  #uKick { fill: #B5E05A; }
+  .lab { font-size: 17px; fill: #E4E7DF; paint-order: stroke; stroke: #14161A; stroke-opacity: .55; stroke-width: 3.5px; stroke-linejoin: round; }
+  .lab.cur { fill: #fff; font-weight: 700; }
+  .seg { fill: #fff; fill-opacity: .7; stroke: #14161A; stroke-opacity: .3; stroke-width: 1; }
+  .seg.vid { fill-opacity: .5; }
+  body.uilight .btn .bg { fill: #1F2124; fill-opacity: .08; stroke: #1F2124; stroke-opacity: .3; }
+  body.uilight .btn:hover .bg { fill-opacity: .18; }
+  body.uilight #bPlay .bg { fill: #9CCE2B; fill-opacity: 1; stroke: none; }
+  body.uilight .ico { fill: #1F2124; }
+  body.uilight .icoS { stroke: #1F2124; }
+  body.uilight .ol, body.uilight .lab { stroke: none; }
+  body.uilight .tx { fill: #1F2124; }
+  body.uilight #uKick { fill: #6D9037; }
+  body.uilight .lab { fill: #6B6E73; }
+  body.uilight .lab.cur { fill: #1F2124; }
+  body.uilight .seg { fill: #1F2124; fill-opacity: .14; stroke: none; }
+  body.uilight .seg.vid { fill-opacity: .09; }
+  .num { font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+<div id="box">
+  <div id="vidwrap" class="layer"><div id="yt"></div></div>
+  <div id="card" class="layer">
+    <svg viewBox="0 0 1920 1080" preserveAspectRatio="xMidYMid meet" style="width:100%;height:100%;display:block">
+      <rect width="1920" height="1080" fill="#fff"/>
+      <rect x="60" y="1000" width="1800" height="14" rx="7" fill="#F3F4F1"/>
+      <rect id="cardbar" x="60" y="1000" width="0" height="14" rx="7" fill="#9CCE2B"/>
+      <text x="60" y="110" style="font:700 44px Bahnschrift,'Roboto Condensed','sans-serif-condensed','Segoe UI',Roboto,Arial,sans-serif;fill:#1F2124">HTL St. Pölten</text>
+      <text x="60" y="158" style="font:32px 'Segoe UI',Roboto,Arial,sans-serif;fill:#595B60">Abteilung Elektrotechnik · Antriebstechnik &amp; Elektromobilität</text>
+      <rect x="60" y="200" width="1800" height="10" fill="#9CCE2B"/>
+      <rect x="160" y="400" width="300" height="300" rx="60" fill="#9CCE2B"/>
+      <text id="cbadge" x="310" y="625" text-anchor="middle" style="font:700 220px Bahnschrift,'Roboto Condensed','sans-serif-condensed','Segoe UI',Roboto,Arial,sans-serif;fill:#1F2124"></text>
+      <path id="cplay" d="M262,470 L392,550 L262,630 Z" fill="#1F2124"/>
+      <text id="ckick" x="540" y="460" style="font:600 46px Bahnschrift,'Roboto Condensed','sans-serif-condensed','Segoe UI',Roboto,Arial,sans-serif;letter-spacing:.09em;fill:#6D9037"></text>
+      <text id="ctitle" x="532" y="590" style="font:700 120px Bahnschrift,'Roboto Condensed','sans-serif-condensed','Segoe UI',Roboto,Arial,sans-serif;fill:#1F2124"></text>
+      <text id="csub" x="540" y="680" style="font:52px 'Segoe UI',Roboto,Arial,sans-serif;fill:#595B60"></text>
+      <text id="cfoot" x="60" y="968" style="font:28px 'Segoe UI',Roboto,Arial,sans-serif;fill:#595B60"></text>
+    </svg>
+  </div>
+  <!-- die Animationen (je ein iframe) setzt das Skript hier davor ein -->
+  <div id="catch"></div>
+  <svg id="hint" viewBox="0 0 1920 1080" preserveAspectRatio="xMidYMid meet">
+    <g transform="translate(960 540)">
+      <rect x="-580" y="-130" width="1160" height="260" rx="40" fill="#1F2124" fill-opacity=".92"/>
+      <circle cx="-440" cy="0" r="72" fill="#9CCE2B"/><path d="M-462,-40 L-388,0 L-462,40 Z" fill="#1F2124"/>
+      <text x="-336" y="-12" style="font:600 52px Bahnschrift,'Roboto Condensed','sans-serif-condensed','Segoe UI',Roboto,Arial,sans-serif;fill:#fff">Video starten: einmal OK drücken</text>
+      <text x="-336" y="52" style="font:34px 'Segoe UI',Roboto,Arial,sans-serif;fill:#D8DBD3">oder direkt aufs Video tippen bzw. klicken</text>
+    </g>
+  </svg>
+  <svg id="ui" viewBox="0 0 1920 1080" preserveAspectRatio="xMidYMid meet">
+    <!-- schlanke Leiste ohne schwarzen Balken: über dem Video ein leichter, durchscheinender dunkler Verlauf,
+         über Titelkarten und Animationen ein heller Schleier (siehe uilight im Stil oben) -->
+    <defs>
+      <linearGradient id="shade" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#14161A" stop-opacity="0"/><stop offset=".45" stop-color="#14161A" stop-opacity=".3"/>
+        <stop offset="1" stop-color="#14161A" stop-opacity=".55"/>
+      </linearGradient>
+      <linearGradient id="veil" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset=".09" stop-color="#fff" stop-opacity=".93"/>
+        <stop offset=".3" stop-color="#fff" stop-opacity=".97"/><stop offset="1" stop-color="#fff" stop-opacity=".97"/>
+      </linearGradient>
+    </defs>
+    <g id="uiPos"><!-- ganze Leiste; das Skript schiebt sie an den unteren Rand (CONFIG.leisteRand) -->
+    <rect id="shadeDark" x="0" y="890" width="1920" height="190" fill="url(#shade)"/>
+    <rect id="shadeLight" x="0" y="908" width="1920" height="172" fill="url(#veil)"/>
+    <g id="bPrev" class="hit btn" transform="translate(84 960)"><title>Voriges Kapitel</title><circle class="bg" r="24"/>
+      <rect class="ico" x="-12" y="-10" width="4" height="20" rx="1"/><path class="ico" d="M11,-10 L-6,0 L11,10 Z"/></g>
+    <g id="bBack" class="hit btn" transform="translate(142 960)"><title>10 Sekunden zurück</title><circle class="bg" r="24"/>
+      <text class="ico" y="6" text-anchor="middle" style="font-size:17px;font-weight:700">−10</text></g>
+    <g id="bPlay" class="hit btn" transform="translate(206 960)"><title>Pause / weiter</title><circle class="bg" r="30"/>
+      <path id="icoPlay" class="ico" d="M-8,-14 L16,0 L-8,14 Z"/>
+      <g id="icoPause"><rect class="ico" x="-11" y="-13" width="8" height="26" rx="1.5"/><rect class="ico" x="3" y="-13" width="8" height="26" rx="1.5"/></g></g>
+    <g id="bFwd" class="hit btn" transform="translate(270 960)"><title>10 Sekunden vor</title><circle class="bg" r="24"/>
+      <text class="ico" y="6" text-anchor="middle" style="font-size:17px;font-weight:700">+10</text></g>
+    <g id="bNext" class="hit btn" transform="translate(328 960)"><title>Nächstes Kapitel</title><circle class="bg" r="24"/>
+      <rect class="ico" x="8" y="-10" width="4" height="20" rx="1"/><path class="ico" d="M-11,-10 L6,0 L-11,10 Z"/></g>
+    <text id="uKick" class="ol" x="380" y="948" style="font-size:16px;font-weight:600;letter-spacing:.08em"></text>
+    <text id="uTitle" class="ol tx" x="380" y="975" style="font-size:25px;font-weight:600"></text>
+    <text id="uTime" class="num ol tx" x="1792" y="968" text-anchor="end" style="font-size:22px;font-weight:600"></text>
+    <g id="bFull" class="hit btn" transform="translate(1836 960)"><title>Vollbild</title><circle class="bg" r="24"/>
+      <path class="icoS" d="M-11,-4 V-11 H-4 M4,-11 H11 V-4 M11,4 V11 H4 M-4,11 H-11 V4" fill="none" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></g>
+    <g id="bar"></g>
+    <g id="labels"></g>
+    <rect id="barHit" class="hit" x="40" y="990" width="1840" height="32" fill="#fff" fill-opacity="0"/>
+    <circle id="knob" cx="60" cy="1006" r="10" fill="#9CCE2B" stroke="#fff" stroke-width="3" style="pointer-events:none"/>
+    <g id="tip" style="display:none;pointer-events:none">
+      <rect id="tipBg" x="0" y="950" width="10" height="34" rx="8" fill="#fff"/>
+      <text id="tipTx" class="num" x="0" y="974" text-anchor="middle" style="font-size:20px;font-weight:600;fill:#1F2124"></text>
+    </g>
+    </g>
+  </svg>
+</div>
+<script>
+"use strict";
+/* ================= Einstellungen =================
+   ABLAUF: Kapitel in dieser Reihenfolge, danach von vorn. Vor jedem Kapitel kommt eine Titelkarte.
+   - typ "video": Ausschnitt von Sekunde „von“ bis „bis“ aus dem YouTube-Video (optional eigene „id“ und „quelle“).
+     Die Grenzen liegen knapp vor bzw. hinter echten Szenenwechseln (bildgenau gemessen).
+   - typ "anim": eine der Animationen; die Dauer meldet die Animation selbst.
+   - kurz: Beschriftung unter der Zeitleiste. */
+const CONFIG = {
+  karte: 4.5,                     // Sekunden je Titelkarte
+  leisteRand: 10,                 // Abstand der Zeitleiste zum unteren Bildrand (Bildpunkte bei 1080 Zeilen). Schneidet der TV
+                                  // den Rand ab, z. B. 40 eintragen; zum Ausprobieren ohne Ändern: Adresse mit ?rand=40
+  ton: false,                     // Video mit Ton? (Autoplay mit Ton erlauben die meisten Browser nicht)
+  ki: "Animationen mit KI-Unterstützung (Claude) erstellt und fachlich geprüft · HTL St. Pölten, Abteilung Elektrotechnik",
+  video: { id: "UwnZYkLV2SY", quelle: "Video: NIDE Group, „motor manufacturing automatically“ · YouTube, eingebettet, ohne Ton" },
+  ABLAUF: [
+    { typ: "video", von: 0, bis: 117.0, kick: "VIDEO · TEIL 1 VON 3", titel: "So entsteht ein Anker",
+      sub: "Draht aufwickeln und am Kommutator befestigen", kurz: "Video: Anker" },
+    { typ: "anim", src: "lorentzkraft.html", dauer: 49, badge: "2", kick: "STATION 2", titel: "Die Lorentzkraft",
+      sub: "Warum wird ein Leiter im Magnetfeld zur Seite gedrückt?", kurz: "Lorentzkraft" },
+    { typ: "video", von: 117.45, bis: 242.3, kick: "VIDEO · TEIL 2 VON 3", titel: "Der Anker wird fertig",
+      sub: "Unter anderem wird der Kommutator glatt abgedreht", kurz: "Video: Anker" },
+    { typ: "anim", src: "gsm.html", dauer: 36, badge: "3", kick: "STATION 3 · GSM", titel: "Die Gleichstrommaschine",
+      sub: "Der Kommutator schaltet den Strom weiter", kurz: "GSM" },
+    { typ: "video", von: 242.7, bis: 452.0, kick: "VIDEO · TEIL 3 VON 3", titel: "So entsteht ein Stator",
+      sub: "Blechpaket isolieren, Spulen wickeln, einziehen und formen", kurz: "Video: Stator" },
+    { typ: "anim", src: "psm.html", dauer: 52.5, badge: "5", kick: "STATION 5 · PSM", titel: "Die Synchronmaschine",
+      sub: "Drehstrom, Drehfeld und ein Dauermagnet", kurz: "PSM" },
+    // Beispiel für ein zusätzliches Video (geprüft, darf eingebettet werden):
+    // { typ: "video", id: "ksUFvQlrzwo", von: 0, bis: 159, kick: "VIDEO", titel: "E-Antriebe aus Steyr",
+    //   sub: "BMW Group Werk Steyr (Oberösterreich)", quelle: "Video: AutoMotoTV Deutsch · YouTube", kurz: "Video: Steyr" },
+  ],
+};
+
+/* ================= Aufbau ================= */
+const $ = id => document.getElementById(id);
+const NS = "http://www.w3.org/2000/svg";
+const body = document.body, box = $("box"), card = $("card"), vidwrap = $("vidwrap"), catchEl = $("catch");
+const Q = new URLSearchParams(location.search);
+const CH = CONFIG.ABLAUF.map((c, n) => Object.assign({}, c, { n, ph: [], T: 0, frame: null }));
+CH.forEach(c => { if (c.typ === "video") { c.dauer = c.bis - c.von; c.vid = c.id || CONFIG.video.id; } });
+const PIECES = [];                      // je Kapitel: Titelkarte + Inhalt
+CH.forEach(c => { PIECES.push({ typ: "karte", ch: c }); PIECES.push({ typ: c.typ, ch: c }); });
+const dur = p => p.typ === "karte" ? CONFIG.karte : p.ch.dauer;
+const LAYERS = [card, vidwrap];
+for (const c of CH) if (c.typ === "anim") {
+  const f = document.createElement("iframe");
+  f.className = "layer"; f.title = c.titel; f.setAttribute("allow", "autoplay"); f.setAttribute("tabindex", "-1");
+  f.src = c.src + "?tv";
+  box.insertBefore(f, catchEl); c.frame = f; LAYERS.push(f);
+}
+const post = (c, m) => { try { c.frame.contentWindow.postMessage(m, "*"); } catch (e) {} };
+
+let cur = 0, loc = 0, paused = Q.has("pause"), userAct = false, now = performance.now();
+
+/* ================= YouTube =================
+   Ein einziger Player bleibt die ganze Zeit geladen. Er wird am Ende eines Teils nur angehalten und
+   beim nächsten Teil an der richtigen Stelle fortgesetzt (keine Ladepausen, höchstens einmal Werbung).
+   Nur über http/https; bei file:// meldet YouTube „Fehler 153“, dann laufen nur die Animationen. */
+let yt = null, ytReady = false, ytLoading = false, apiFailed = false, vidFailed = false, ytBlocked = false, everPlayed = false;
+let ytId = "", vidStarted = false, lastRetry = 0, vidWait = 0, vidSeekUntil = 0, seekTimer = null, seekPending = null, lastSeekAt = 0, retryAt = 0;
+const vt = { raw: -1, at: 0 };
+const webProto = /^https?:$/.test(location.protocol);
+const anyVideo = CH.some(c => c.typ === "video");
+const videoOk = () => anyVideo && webProto && navigator.onLine !== false && !apiFailed && !vidFailed && !ytBlocked;
+const PLAYING = 1, PAUSED = 2, BUFFERING = 3, ENDED = 0, CUED = 5;
+function loadYT() {
+  if (!anyVideo || !webProto || ytLoading || ytReady) return;
+  ytLoading = true;
+  const first = CH.find(c => c.typ === "video");
+  window.onYouTubeIframeAPIReady = () => {
+    ytId = first.vid;
+    yt = new YT.Player("yt", {
+      host: "https://www.youtube-nocookie.com", videoId: first.vid,
+      playerVars: { controls: 0, rel: 0, playsinline: 1, iv_load_policy: 3, cc_load_policy: 0, disablekb: 1, fs: 0,
+                    start: Math.floor(first.von), origin: location.origin },
+      events: {
+        onReady: () => { ytReady = true; ytLoading = false; if (!CONFIG.ton) yt.mute(); rebuild(); },
+        onStateChange: e => {
+          if (e.data === PLAYING) {
+            everPlayed = true; vidWait = performance.now(); hint(false);
+            if (PIECES[cur].typ !== "video" || paused) yt.pauseVideo();   // spielt nur, wenn gerade ein Videoteil dran ist
+          }
+          if (e.data === ENDED && PIECES[cur].typ === "video") next();
+        },
+        onError: () => { vidFailed = true; hint(false); rebuild(); if (PIECES[cur].typ === "video") next(); },
+      },
+    });
+  };
+  const s = document.createElement("script");
+  s.src = "https://www.youtube.com/iframe_api";
+  s.onerror = () => { ytLoading = false; apiFailed = true; retryAt = performance.now() + 60000; s.remove(); rebuild(); };
+  document.head.appendChild(s);
+}
+addEventListener("online", () => { if (!ytReady) { apiFailed = false; loadYT(); rebuild(); } });
+function ensureVideo(c) {
+  if (c.vid !== ytId) { ytId = c.vid; yt.cueVideoById({ videoId: c.vid, startSeconds: c.von }); }
+}
+/* Videozeit flüssig: die API liefert nur ein paar Werte pro Sekunde, dazwischen wird weitergezählt */
+function ytTime() {
+  const x = yt.getCurrentTime() || 0;
+  if (x !== vt.raw) { vt.raw = x; vt.at = now; }
+  return yt.getPlayerState() === PLAYING ? x + Math.min(0.5, (now - vt.at) / 1000) : x;
+}
+function ytSeek(t) {             // beim Spulen höchstens alle 0,3 s wirklich springen
+  seekPending = t; vidSeekUntil = now + 1500;
+  const go = () => { seekTimer = null; lastSeekAt = performance.now(); try { yt.seekTo(seekPending, true); } catch (e) {} };
+  if (!seekTimer) { if (now - lastSeekAt > 300) go(); else seekTimer = setTimeout(go, 300); }
+}
+
+/* ================= Zeitleiste: nur verfügbare Teile ================= */
+let TL = [], CHAPS = [], TOTAL = 1;
+const avail = c => c.typ !== "video" || videoOk();
+function rebuild() {
+  TL = []; CHAPS = []; let t = 0;
+  PIECES.forEach((p, i) => {
+    if (!avail(p.ch)) return;
+    TL.push({ i, t0: t, d: dur(p) });
+    if (p.typ === "karte") CHAPS.push({ ch: p.ch, t0: t, t1: t + dur(p) }); else CHAPS[CHAPS.length - 1].t1 = t + dur(p);
+    t += dur(p);
+  });
+  TOTAL = Math.max(1, t);
+  drawBar();
+}
+const entry = i => TL.find(e => e.i === i);
+function gnow() { const e = entry(cur); return e ? e.t0 + Math.min(loc, e.d) : 0; }
+const chapIdx = () => CHAPS.findIndex(k => k.ch === PIECES[cur].ch);
+
+/* ================= Ablauf ================= */
+function show(layer) { for (const l of LAYERS) l.classList.toggle("show", l === layer); }
+function fillCard(c) {
+  const v = c.typ === "video";
+  $("cbadge").textContent = v ? "" : c.badge; $("cplay").style.display = v ? "" : "none";
+  fit($("ckick"), c.kick, 1320); fit($("ctitle"), c.titel, 1328); fit($("csub"), c.sub, 1320);
+  fit($("cfoot"), v ? (c.quelle || CONFIG.video.quelle) : CONFIG.ki, 1800);
+}
+/* Text einpassen: wird er (z. B. mit der Schrift des Fernsehers) zu breit, wird er kleiner */
+function fit(el, txt, maxW) {
+  if (!el.dataset.fs) el.dataset.fs = getComputedStyle(el).fontSize;     // ursprüngliche Größe merken
+  el.textContent = txt; el.style.fontSize = el.dataset.fs;
+  try { const w = el.getComputedTextLength(); if (w > maxW) el.style.fontSize = (parseFloat(el.dataset.fs) * maxW / w).toFixed(1) + "px"; } catch (e) {}
+}
+function goTo(i, l) {
+  const prev = PIECES[cur], p = PIECES[i];
+  if (prev !== p || l === 0) {
+    if (prev.typ === "anim" && prev !== p) post(prev.ch, { cmd: "pause" });
+    if (prev.typ === "video" && p.typ !== "video" && ytReady) { try { yt.pauseVideo(); } catch (e) {} }
+    hint(false);
+  }
+  cur = i; loc = Math.max(0, l || 0);
+  if (p.typ === "karte") {
+    fillCard(p.ch); show(card);
+    const nx = PIECES[i + 1];
+    if (nx && nx.typ === "anim") post(nx.ch, { cmd: "seek", t: 0, play: false });
+    if (nx && nx.typ === "video" && ytReady) prepareVideo(nx.ch);
+  } else if (p.typ === "anim") {
+    show(p.ch.frame); p.ch.T = loc;
+    post(p.ch, { cmd: "seek", t: loc, play: !paused });
+  } else {
+    show(vidwrap); vidWait = now; vidStarted = false;
+    if (ytReady) startVideo(p.ch);
+  }
+  updateUI();
+}
+function prepareVideo(c) {          // während der Titelkarte schon an die Startstelle springen (puffert vor)
+  try { if (c.vid === ytId && yt.getPlayerState() === PAUSED) { yt.seekTo(c.von, true); } } catch (e) {}
+}
+function startVideo(c) {
+  vidStarted = true;
+  try {
+    ensureVideo(c); if (!CONFIG.ton) yt.mute();
+    ytSeek(c.von + loc);
+    if (paused) yt.pauseVideo(); else yt.playVideo();
+  } catch (e) {}
+}
+function next() {
+  for (let k = 1; k <= PIECES.length; k++) {
+    const i = (cur + k) % PIECES.length;
+    if (avail(PIECES[i].ch)) return goTo(i, 0);
+  }
+}
+function seekG(g) {
+  g = Math.max(0, Math.min(TOTAL - 0.05, g));
+  const e = TL.find(e => g < e.t0 + e.d) || TL[TL.length - 1];
+  const l = g - e.t0;
+  if (e.i === cur && PIECES[cur].typ === "video") { loc = l; if (ytReady) ytSeek(PIECES[cur].ch.von + l); updateUI(); return; }
+  if (e.i === cur && PIECES[cur].typ === "anim") { loc = l; PIECES[cur].ch.T = l; post(PIECES[cur].ch, { cmd: "seek", t: l, play: !paused }); updateUI(); return; }
+  goTo(e.i, l);
+}
+const seekBy = d => seekG(gnow() + d);
+function chapter(k) { if (!CHAPS.length) return; k = (k + CHAPS.length) % CHAPS.length; seekG(CHAPS[k].t0); }
+function prevChapter() { const k = chapIdx(); if (k >= 0 && gnow() - CHAPS[k].t0 > 3) chapter(k); else chapter(k - 1); }
+const nextChapter = () => chapter(chapIdx() + 1);
+
+function setPaused(p) {
+  paused = p; body.classList.toggle("paused", p);
+  const pc = PIECES[cur];
+  if (pc.typ === "anim") post(pc.ch, { cmd: p ? "pause" : "play" });
+  else if (pc.typ === "video" && ytReady) { try { if (p) yt.pauseVideo(); else { vidWait = now; yt.playVideo(); } } catch (e) {} }
+  showUI();
+}
+function hint(on) { body.classList.toggle("hint", on); body.classList.toggle("vidklick", on); }
+
+/* ================= Taktgeber ================= */
+let lastNow = performance.now();
+function tick(t) {
+  now = t; const dt = Math.min(0.25, Math.max(0, (t - lastNow) / 1000)); lastNow = t;
+  const p = PIECES[cur];
+  if (!avail(p.ch)) next();
+  else if (p.typ === "karte") {
+    if (!paused) { loc += dt; if (loc >= CONFIG.karte) next(); }
+    $("cardbar").setAttribute("width", (1800 * Math.min(1, loc / CONFIG.karte)).toFixed(1));
+  } else if (p.typ === "anim") {
+    loc = p.ch.T;
+  } else videoTick(p.ch);
+  if (body.classList.contains("ui")) updateUI();
+  requestAnimationFrame(tick);
+}
+function videoTick(c) {
+  if (!ytReady) {                                  // Player lädt noch: bis 10 s warten, sonst ohne Video weiter
+    if (!paused && now - vidWait > 10000) { apiFailed = true; retryAt = now + 60000; rebuild(); next(); }
+    return;
+  }
+  if (!vidStarted) startVideo(c);          // Player war beim Start dieses Teils noch nicht bereit
+  const st = yt.getPlayerState();
+  if (now > vidSeekUntil) loc = Math.max(0, ytTime() - c.von);
+  else if (Math.abs(ytTime() - (c.von + loc)) < 0.6 && st === PLAYING) vidSeekUntil = 0;
+  if (paused) return;
+  if (st === PLAYING) { vidWait = now; hint(false); }
+  else {
+    const w = now - vidWait, stuck = st !== BUFFERING;   // puffern ist kein Blockieren
+    if (w > 2500 && now - lastRetry > 2500) { lastRetry = now; try { yt.playVideo(); } catch (e) {} }
+    if (stuck && w > 4000 && !everPlayed) hint(true);   // Browser lässt Videos erst nach einem Tastendruck laufen?
+    if (w > (stuck ? 16000 : 25000)) {                               // dann ohne Video weiter (ab dem nächsten Tastendruck wieder mit)
+      hint(false);
+      if (!everPlayed && !userAct) { ytBlocked = true; rebuild(); }
+      next(); return;
+    }
+  }
+  if (loc >= c.dauer - 0.02 && now > vidSeekUntil) next();
+}
+setInterval(() => { if (apiFailed && !ytReady && webProto && navigator.onLine !== false && performance.now() > retryAt) { apiFailed = false; loadYT(); rebuild(); } }, 15000);
+
+/* ================= Bedienleiste ================= */
+const BX0 = 60, BX1 = 1860, BY = 1006, BH = 8, GAP = 5;
+{ /* Leiste nach unten schieben: im Entwurf endet die unterste Zeile (Kapitelnamen) bei y = 1044 */
+  const r = Q.has("rand") ? parseFloat(Q.get("rand")) : CONFIG.leisteRand;
+  const rand = Math.max(0, Math.min(150, isFinite(r) ? r : 10));
+  $("uiPos").setAttribute("transform", `translate(0 ${(1080 - rand - 1044).toFixed(1)})`);
+}
+const X = g => BX0 + (BX1 - BX0) * g / TOTAL;
+const G = x => (x - BX0) / (BX1 - BX0) * TOTAL;
+function svg(parent, tag, attrs, txt) { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (txt != null) e.textContent = txt; parent.appendChild(e); return e; }
+const fmt = s => { s = Math.max(0, Math.floor(s + 1e-6)); return Math.floor(s / 60) + ":" + String(s % 60).padStart(2, "0"); };
+let SEG = [];
+function drawBar() {
+  const bar = $("bar"), labs = $("labels"); bar.textContent = ""; labs.textContent = ""; SEG = [];
+  CHAPS.forEach((k, n) => {
+    const x0 = X(k.t0) + (n ? GAP / 2 : 0), x1 = X(k.t1) - (n < CHAPS.length - 1 ? GAP / 2 : 0), w = Math.max(2, x1 - x0);
+    svg(bar, "rect", { x: x0, y: BY - BH / 2, width: w, height: BH, rx: BH / 2, class: k.ch.typ === "video" ? "seg vid" : "seg" });
+    const played = svg(bar, "rect", { x: x0, y: BY - BH / 2, width: 0, height: BH, rx: BH / 2, fill: "#9CCE2B" });
+    if (k.ch.typ === "anim") for (const ph of k.ch.ph.slice(1)) {
+      const tx = X(k.t0 + CONFIG.karte + ph); svg(bar, "rect", { x: tx - 1, y: BY - BH / 2, width: 2, height: BH, fill: "#14161A", "fill-opacity": .35 });
+    }
+    const lab = svg(labs, "text", { x: x0 + 3, y: 1040, class: "lab" }, k.ch.kurz || k.ch.titel);
+    try { const lw = lab.getComputedTextLength(); if (lw > w - 6) { const fs = 17 * (w - 6) / lw; if (fs < 12) lab.style.display = "none"; else lab.style.fontSize = fs.toFixed(1) + "px"; } } catch (e) {}
+    const hit = svg(labs, "rect", { x: x0, y: 1022, width: w, height: 40, fill: "#fff", "fill-opacity": 0, class: "hit" });
+    hit.addEventListener("click", ev => { ev.stopPropagation(); userAction(); chapter(n); showUI(); });
+    SEG.push({ x0, w, played, lab });
+  });
+  updateUI();
+}
+let dragging = false, dragG = 0;
+function updateUI() {
+  const g = dragging ? dragG : gnow(), gx = X(g);
+  $("knob").setAttribute("cx", gx.toFixed(1));
+  const k = chapIdx();
+  SEG.forEach((s, n) => { s.played.setAttribute("width", Math.max(0, Math.min(s.w, gx - s.x0)).toFixed(1)); s.lab.classList.toggle("cur", n === k); });
+  const c = PIECES[cur].ch;
+  body.classList.toggle("uilight", PIECES[cur].typ !== "video");
+  $("uKick").textContent = k >= 0 ? `KAPITEL ${k + 1} VON ${CHAPS.length} · ${c.typ === "video" ? "VIDEO" : "ANIMATION"}` : "";
+  const t = c.typ === "video" ? "Video: " + c.titel : c.titel;
+  if ($("uTitle").textContent !== t) fit($("uTitle"), t, 1200);
+  $("uTime").textContent = fmt(g) + " / " + fmt(TOTAL);
+  $("icoPlay").style.display = paused ? "" : "none"; $("icoPause").style.display = paused ? "none" : "";
+}
+let uiTimer = null;
+function showUI() {
+  body.classList.add("ui"); updateUI(); clearTimeout(uiTimer);
+  uiTimer = setTimeout(function h() { if (paused || dragging || Q.has("ui")) uiTimer = setTimeout(h, 1000); else body.classList.remove("ui"); }, 2500);
+}
+function hideUI() { clearTimeout(uiTimer); if (!paused) body.classList.remove("ui"); }
+
+/* ================= Bedienung: Fernbedienung, Tastatur, Maus, Touch ================= */
+function userAction() {
+  if (!userAct) { userAct = true; if (ytBlocked) { ytBlocked = false; rebuild(); } }
+  if (body.classList.contains("hint") && ytReady) { try { yt.playVideo(); } catch (e) {} }
+}
+function fullscreen(toggle) {
+  const d = document.documentElement, fs = document.fullscreenElement || document.webkitFullscreenElement;
+  if (fs) { if (toggle && document.exitFullscreen) document.exitFullscreen().catch(() => {}); return; }
+  try { const r = d.requestFullscreen ? d.requestFullscreen() : d.webkitRequestFullscreen && d.webkitRequestFullscreen(); if (r && r.catch) r.catch(() => {}); } catch (e) {}
+}
+let fsTried = false;
+const KEYS = {                     // key-Name bzw. keyCode der Fernbedienung → Aktion
+  toggle: [" ", "Enter", "MediaPlayPause", "k", "K", "Select", 13, 32, 23, 66, 85, 179],
+  play: ["MediaPlay", 126, 415], pause: ["MediaPause", "MediaStop", 127, 19, 413],
+  back: ["ArrowLeft", "MediaRewind", "j", "J", 37, 21, 89, 227, 412],
+  fwd: ["ArrowRight", "MediaFastForward", "l", "L", 39, 22, 90, 228, 417],
+  prev: ["ArrowUp", "PageUp", "MediaTrackPrevious", "ChannelDown", 38, 33, 88, 177],
+  next: ["ArrowDown", "PageDown", "MediaTrackNext", "ChannelUp", 40, 34, 87, 176],
+};
+function onKey(k, code) {
+  const is = a => a.includes(k) || (k === "Unidentified" || !k ? a.includes(code) : false);
+  const wasBlocked = ytBlocked;
+  userAction();
+  if (body.classList.contains("hint") && (is(KEYS.toggle) || is(KEYS.play))) { setPaused(false); return true; }   // OK startet das Video
+  if (wasBlocked && (is(KEYS.toggle) || is(KEYS.play))) { showUI(); return true; }   // erster OK-Druck schaltet nur die Videos frei
+  if (is(KEYS.toggle)) {
+    // erster OK-Druck in einem Browserfenster mit Leisten: nur Vollbild, nicht pausieren
+    if (!fsTried) { fsTried = true; if (innerHeight < screen.height - 4) { fullscreen(false); showUI(); return true; } }
+    setPaused(!paused);
+  }
+  else if (is(KEYS.play)) setPaused(false);
+  else if (is(KEYS.pause)) setPaused(true);
+  else if (is(KEYS.back)) { seekBy(-10); showUI(); }
+  else if (is(KEYS.fwd)) { seekBy(10); showUI(); }
+  else if (is(KEYS.prev)) { prevChapter(); showUI(); }
+  else if (is(KEYS.next)) { nextChapter(); showUI(); }
+  else if (/^[1-9]$/.test(k)) { chapter(+k - 1); showUI(); }
+  else if (k === "0" || k === "Home") { seekG(0); showUI(); }
+  else if (k === "f" || k === "F") fullscreen(true);
+  else if (k === "Escape") { hideUI(); return false; }
+  else { showUI(); return false; }
+  return true;
+}
+addEventListener("keydown", e => { if (onKey(e.key, e.keyCode)) e.preventDefault(); });
+addEventListener("message", e => {
+  const m = e.data; if (!m || typeof m !== "object" || !m.tv) return;
+  const c = CH.find(c => c.frame && c.frame.contentWindow === e.source); if (!c) return;
+  if (m.tv === "ready") {
+    c.dauer = m.loop; c.ph = m.ph || []; rebuild();
+    if (PIECES[cur].ch === c && PIECES[cur].typ === "anim") post(c, { cmd: "seek", t: loc, play: !paused });
+  } else if (m.tv === "time") c.T = m.t;
+  else if (m.tv === "done") { if (PIECES[cur].ch === c && PIECES[cur].typ === "anim" && !paused) next(); }
+  else if (m.tv === "key") { if (onKey(m.key, m.code)) {} }
+});
+/* Maus und Touch: Klick ins Bild = Pause/weiter; beim Tippen zeigt der erste Tipp nur die Leiste */
+catchEl.addEventListener("pointerup", e => {
+  userAction();
+  if (e.pointerType !== "mouse" && !body.classList.contains("ui")) { showUI(); return; }
+  setPaused(!paused);
+});
+const btn = (id, fn) => $(id).addEventListener("click", e => { e.stopPropagation(); userAction(); fn(); showUI(); });
+btn("bPlay", () => setPaused(!paused)); btn("bBack", () => seekBy(-10)); btn("bFwd", () => seekBy(10));
+btn("bPrev", prevChapter); btn("bNext", nextChapter); btn("bFull", () => fullscreen(true));
+/* Zeitleiste: klicken oder ziehen */
+const uiSvg = $("ui");
+function svgX(e) { const pt = uiSvg.createSVGPoint(); pt.x = e.clientX; pt.y = e.clientY; return pt.matrixTransform(uiSvg.getScreenCTM().inverse()).x; }
+const barHit = $("barHit");
+let dragLast = 0;
+barHit.addEventListener("pointerdown", e => {
+  userAction(); dragging = true; dragG = Math.max(0, Math.min(TOTAL - 0.05, G(svgX(e))));
+  try { barHit.setPointerCapture(e.pointerId); } catch (x) {}
+  showUI(); updateUI(); e.preventDefault();
+});
+barHit.addEventListener("pointermove", e => {
+  const g = Math.max(0, Math.min(TOTAL - 0.05, G(svgX(e))));
+  if (e.pointerType === "mouse") {          // Vorschau: Zeit und Kapitel
+    const k = CHAPS.find(k => g < k.t1) || CHAPS[CHAPS.length - 1], tx = $("tipTx");
+    tx.textContent = fmt(g) + " · " + (k.ch.kurz || k.ch.titel);
+    const w = tx.getComputedTextLength() + 36, x = Math.max(BX0 + w / 2, Math.min(BX1 - w / 2, X(g)));
+    tx.setAttribute("x", x.toFixed(1)); $("tipBg").setAttribute("x", (x - w / 2).toFixed(1)); $("tipBg").setAttribute("width", w.toFixed(1));
+    $("tip").style.display = "";
+  }
+  if (!dragging) return;
+  dragG = g; updateUI();
+  if (performance.now() - dragLast > 120) { dragLast = performance.now(); seekG(g); }
+});
+function endDrag() { if (!dragging) return; dragging = false; seekG(dragG); showUI(); }
+barHit.addEventListener("pointerup", endDrag);
+barHit.addEventListener("pointercancel", endDrag);
+barHit.addEventListener("pointerleave", () => { $("tip").style.display = "none"; });
+/* Mauszeiger ausblenden, Leiste bei Mausbewegung zeigen */
+let idleT = null;
+addEventListener("mousemove", () => { body.classList.remove("idle"); clearTimeout(idleT); idleT = setTimeout(() => body.classList.add("idle"), 2500); showUI(); });
+body.classList.add("idle");
+/* Bildschirm wach halten, wo der Browser es erlaubt */
+async function keepAwake() { try { if ("wakeLock" in navigator && document.visibilityState === "visible") await navigator.wakeLock.request("screen"); } catch (e) {} }
+document.addEventListener("visibilitychange", keepAwake); keepAwake();
+
+/* ================= Start ================= */
+loadYT(); rebuild();
+{
+  // ?k=3 startet bei Kapitel 3, ?t=125 bei Sekunde 125 der Runde, ?ui lässt die Leiste stehen, ?pause startet angehalten
+  const first = PIECES.findIndex(p => avail(p.ch));
+  cur = first; goTo(first, 0);
+  if (Q.has("k")) chapter((parseInt(Q.get("k"), 10) || 1) - 1);
+  else if (Q.has("t")) seekG(parseFloat(Q.get("t")) || 0);
+  if (paused) setPaused(true);
+  if (Q.has("ui")) showUI();
+}
+requestAnimationFrame(tick);
+window.__tv = () => ({ cur, typ: PIECES[cur].typ, kap: chapIdx() + 1, loc: +loc.toFixed(2), g: +gnow().toFixed(2), total: +TOTAL.toFixed(2),
+                       paused, ytReady, everPlayed, ytBlocked, apiFailed, vidFailed, yt: ytReady ? yt.getPlayerState() : null,
+                       ytT: ytReady ? +yt.getCurrentTime().toFixed(2) : null, chaps: CHAPS.map(k => [k.ch.kurz, +k.t0.toFixed(1)]) });
+</script>
+</body>
+</html>

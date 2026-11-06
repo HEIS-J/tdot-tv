@@ -1,0 +1,453 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GSM · TV</title>
+<style>
+  /* TV-Fassung 16:9 (1920 × 1080, skaliert bis 4K). Farbcode wie Stationstafeln v2:
+     Strom rot, Spannung blau, Feld grün, Kraft schwarz, Bewegung grau. Design HTL-Grün, Rot nie als Designfarbe. */
+  :root {
+    --green: #9CCE2B; --green-dark: #6D9037; --grey: #595B60; --ink: #1F2124;
+    --line: #D8DBD3; --tint: #F5FAEA; --fans: #F3F4F1;
+    --cur: #D7261E; --volt: #1F5FBF; --fld: #2E9B3A; --frc: #000000; --move: #595B60;
+    --nord: #4A4D52; --sued: #CDD1D6; --cu: #B8733A;
+  }
+  html, body { margin: 0; height: 100%; background: #fff; overflow: hidden; }
+  body { font-family: "Segoe UI", Arial, sans-serif; color: var(--ink); user-select: none; -webkit-user-select: none; }
+  body.idle { cursor: none; }
+  #tv { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  .kick { font: 600 32px Bahnschrift, "Roboto Condensed", "sans-serif-condensed", "Segoe UI", sans-serif; letter-spacing: .09em; fill: var(--green-dark); }
+  .head { font: 700 80px Bahnschrift, "Roboto Condensed", "sans-serif-condensed", "Segoe UI", sans-serif; fill: var(--ink); }
+  .brand { font: 700 40px Bahnschrift, "Roboto Condensed", "sans-serif-condensed", "Segoe UI", sans-serif; fill: var(--ink); }
+  .brand2 { font: 28px "Segoe UI", Arial, sans-serif; fill: var(--grey); }
+  .capn { font: 700 40px Bahnschrift, "Roboto Condensed", "sans-serif-condensed", "Segoe UI", sans-serif; fill: var(--green-dark); }
+  .capt { font: 600 56px Bahnschrift, "Roboto Condensed", "sans-serif-condensed", "Segoe UI", sans-serif; fill: var(--ink); transition: opacity .3s; }
+  .lab { font: 40px "Segoe UI", Arial, sans-serif; fill: var(--ink); }
+  .labb { font: 700 40px "Segoe UI", Arial, sans-serif; fill: var(--ink); }
+  .labs { font: 32px "Segoe UI", Arial, sans-serif; fill: var(--grey); }
+  .math { font: italic 66px "Cambria Math", Cambria, "Times New Roman", serif; fill: var(--ink); }
+  .vI, .vB, .vF { font: italic 700 64px "Cambria Math", Cambria, serif; paint-order: stroke; stroke: #fff; stroke-width: 12px; stroke-linejoin: round; }
+  .vI { fill: var(--cur); } .vB { fill: var(--fld); } .vF { fill: #000; }
+  .pole { font: 700 56px Bahnschrift, "Roboto Condensed", "sans-serif-condensed", "Segoe UI", sans-serif; }
+  .legend { font: 30px "Segoe UI", Arial, sans-serif; fill: var(--grey); }
+  .fade { transition: opacity .3s; }
+  #pause { display: none; }
+  body.paused:not(.shot):not(.tv) #pause { display: inline; }   /* in tv.html zeigt die Playlist die Pause an */
+</style>
+</head>
+<body>
+<svg id="tv" viewBox="0 0 1920 1080" preserveAspectRatio="xMidYMid meet" aria-label="GSM · TV">
+  <rect width="1920" height="1080" fill="#fff"/>
+  <rect x="60" y="40" width="124" height="124" rx="26" fill="#9CCE2B"/>
+  <text x="122" y="131" text-anchor="middle" style="font:700 86px Bahnschrift,'Roboto Condensed','sans-serif-condensed','Segoe UI',sans-serif;fill:#1F2124">3</text>
+  <text x="214" y="80" class="kick">GLEICHSTROMMASCHINE (GSM) · STATION 3</text>
+  <text x="210" y="156" class="head">Der Kommutator macht’s</text>
+  <text id="brand" x="1860" y="96" text-anchor="end" class="brand">HTL St. Pölten</text>
+  <rect id="brandSq" x="1560" y="66" width="30" height="30" rx="6" fill="#9CCE2B"/>
+  <text x="1860" y="136" text-anchor="end" class="brand2">Abteilung Elektrotechnik</text>
+  <rect x="60" y="190" width="1800" height="9" fill="#9CCE2B"/>
+  <circle cx="98" cy="262" r="34" fill="none" stroke="#6D9037" stroke-width="6"/>
+  <text id="capn" x="98" y="276" text-anchor="middle" class="capn"></text>
+  <text id="capt" x="156" y="282" class="capt"></text>
+  <g id="stage"></g>
+  <g id="legend"></g>
+  <rect x="60" y="1060" width="1800" height="8" rx="4" fill="#F3F4F1"/>
+  <rect id="progbar" x="60" y="1060" width="0" height="8" rx="4" fill="#9CCE2B"/>
+  <g id="progticks"></g>
+  <g id="pause"><rect x="1636" y="226" width="224" height="72" rx="36" fill="#1F2124" opacity=".85"/>
+    <rect x="1668" y="246" width="10" height="32" rx="2" fill="#fff"/><rect x="1686" y="246" width="10" height="32" rx="2" fill="#fff"/>
+    <text x="1712" y="275" style="font:600 36px Bahnschrift,'Roboto Condensed','sans-serif-condensed','Segoe UI',sans-serif;fill:#fff">Pause</text></g>
+</svg>
+<script>
+"use strict";
+/* ================= Hilfsfunktionen ================= */
+const NS = "http://www.w3.org/2000/svg";
+const $ = id => document.getElementById(id);
+function el(parent, tag, attrs, text) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (text != null) e.textContent = text;
+  parent.appendChild(e);
+  return e;
+}
+const f1 = v => (Math.round(v * 10) / 10).toString();
+const pts = a => a.map(p => f1(p[0]) + "," + f1(p[1])).join(" ");
+const poly = a => "M" + a.map(p => f1(p[0]) + "," + f1(p[1])).join("L") + "Z";
+const PI = Math.PI, rad = d => d * PI / 180;
+const smooth = x => (x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x));
+const clamp01 = x => Math.max(0, Math.min(1, x));
+const ramp = (a, b, t0, t1, t) => a + (b - a) * smooth((t - t0) / (t1 - t0));
+/* Pfeil als gefüllte Fläche: Schaftbreite w, Spitzenbreite hw, Spitzenlänge hl */
+function arrowD(x1, y1, x2, y2, w, hw, hl) {
+  const dx = x2 - x1, dy = y2 - y1, L = Math.hypot(dx, dy) || 1, ux = dx / L, uy = dy / L, nx = -uy, ny = ux;
+  hl = Math.min(hl, L * 0.7);
+  const bx = x2 - ux * hl, by = y2 - uy * hl;
+  return poly([[x1 + nx * w / 2, y1 + ny * w / 2], [bx + nx * w / 2, by + ny * w / 2], [bx + nx * hw / 2, by + ny * hw / 2], [x2, y2],
+               [bx - nx * hw / 2, by - ny * hw / 2], [bx - nx * w / 2, by - ny * w / 2], [x1 - nx * w / 2, y1 - ny * w / 2]]);
+}
+/* kleine Pfeilspitze an (x, y) in Richtung (dx, dy) */
+function headD(x, y, dx, dy, len, wid) {
+  const L = Math.hypot(dx, dy) || 1, ux = dx / L, uy = dy / L, nx = -uy, ny = ux;
+  return poly([[x + ux * len / 2, y + uy * len / 2], [x - ux * len / 2 + nx * wid / 2, y - uy * len / 2 + ny * wid / 2], [x - ux * len / 2 - nx * wid / 2, y - uy * len / 2 - ny * wid / 2]]);
+}
+/* Symbole für Strom senkrecht zur Bildebene: ⊗ hinein, ⊙ heraus */
+function crossD(x, y, r) { const a = r * 0.62; return `M${f1(x - a)},${f1(y - a)}L${f1(x + a)},${f1(y + a)}M${f1(x + a)},${f1(y - a)}L${f1(x - a)},${f1(y + a)}`; }
+/* Legende unten: [Art, Text]; Art = cur | volt | fld | frc | move */
+function legend(items) {
+  const g = $("legend"); let x = 60;
+  const col = { cur: "#D7261E", volt: "#1F5FBF", fld: "#2E9B3A", frc: "#000", frc0: "#fff", move: "#595B60" };
+  for (const [k, txt] of items) {
+    const f = k === "frc" || k === "frc0", w = f ? 9 : 5, c = col[k];   // frc0: hohler Kraftpfeil (Gegenkraft)
+    el(g, "path", { d: arrowD(x, 1028, x + 64, 1028, w, f ? 26 : 20, f ? 24 : 18), fill: c,
+                    ...(k === "frc0" ? { stroke: "#000", "stroke-width": 3, "stroke-linejoin": "round" } : {}) });
+    const t = el(g, "text", { x: x + 78, y: 1039, class: "legend" }, txt);
+    x += 78 + txt.length * 15 + 56;
+  }
+}
+/* Rechenqualität: 1 = volle Auflösung. Auf langsamen Geräten (z. B. Android-TV) setzt der Player QUAL bis auf 2 hoch,
+   dann rechnen Höhenlinien und Feldpfeile auf einem gröberen Raster (etwa ein Viertel der Rechenzeit). */
+let QUAL = 1;
+/* Höhenlinien (Marching Squares) einer Funktion F(x, y) auf dem Raster h; levels aufsteigend sortiert.
+   Liefert einen Pfad aus Einzelstrecken (mit runden Linienenden sieht das wie durchgehende Linien aus).
+   Optional: Vpre = schon berechnete Rasterwerte (Zeile für Zeile, (nx+1)·(ny+1) Werte). */
+function contourPath(F, x0, y0, x1, y1, h, levels, Vpre) {
+  if (!Vpre) h *= QUAL;
+  const nx = Math.ceil((x1 - x0) / h), ny = Math.ceil((y1 - y0) / h), W = nx + 1;
+  const V = Vpre || new Float64Array(W * (ny + 1));
+  if (!Vpre) for (let j = 0; j <= ny; j++) for (let i = 0; i <= nx; i++) V[j * W + i] = F(x0 + i * h, y0 + j * h);
+  // schnelle Fassung (wichtig für langsame Geräte): keine Hilfsfunktionen und Arrays pro Zelle, Text direkt anhängen
+  let out = "";
+  const nL = levels.length, r = v => Math.round(v * 10) / 10;
+  const seg = (ax, ay, bx, by) => { out += "M" + r(ax) + "," + r(ay) + "L" + r(bx) + "," + r(by); };
+  for (let j = 0; j < ny; j++) {
+    const Y = y0 + j * h, row = j * W;
+    for (let i = 0; i < nx; i++) {
+      const a = V[row + i], b = V[row + i + 1], c = V[row + W + i + 1], d = V[row + W + i];
+      const mn = Math.min(a, b, c, d), mx = Math.max(a, b, c, d);
+      if (!isFinite(mn) || !isFinite(mx)) continue;
+      let lo = 0, hi = nL;
+      while (lo < hi) { const m = (lo + hi) >> 1; if (levels[m] < mn) lo = m + 1; else hi = m; }
+      if (lo >= nL || levels[lo] > mx) continue;
+      const X = x0 + i * h;
+      for (let k = lo; k < nL && levels[k] <= mx; k++) {
+        const L = levels[k];
+        const code = (a > L ? 8 : 0) | (b > L ? 4 : 0) | (c > L ? 2 : 0) | (d > L ? 1 : 0);
+        if (code === 0 || code === 15) continue;
+        // Schnittpunkte auf den Kanten oben (a–b), rechts (b–c), unten (d–c), links (a–d)
+        switch (code) {
+          case 1: case 14: seg(X, Y + h * (L - a) / (d - a), X + h * (L - d) / (c - d), Y + h); break;
+          case 2: case 13: seg(X + h * (L - d) / (c - d), Y + h, X + h, Y + h * (L - b) / (c - b)); break;
+          case 3: case 12: seg(X, Y + h * (L - a) / (d - a), X + h, Y + h * (L - b) / (c - b)); break;
+          case 4: case 11: seg(X + h * (L - a) / (b - a), Y, X + h, Y + h * (L - b) / (c - b)); break;
+          case 6: case 9: seg(X + h * (L - a) / (b - a), Y, X + h * (L - d) / (c - d), Y + h); break;
+          case 7: case 8: seg(X, Y + h * (L - a) / (d - a), X + h * (L - a) / (b - a), Y); break;
+          case 5: seg(X, Y + h * (L - a) / (d - a), X + h * (L - a) / (b - a), Y);
+                  seg(X + h * (L - d) / (c - d), Y + h, X + h, Y + h * (L - b) / (c - b)); break;
+          case 10: seg(X + h * (L - a) / (b - a), Y, X + h, Y + h * (L - b) / (c - b));
+                   seg(X, Y + h * (L - a) / (d - a), X + h * (L - d) / (c - d), Y + h); break;
+        }
+      }
+    }
+  }
+  return out;
+}
+/* Kreuzungspunkte einer Höhenlinie mit einer Strecke (für Feldpfeile) */
+function crossings(F, p0, p1, n, levels) {
+  n = Math.max(20, Math.round(n / QUAL));
+  const res = []; let prev = F(p0[0], p0[1]);
+  for (let s = 1; s <= n; s++) {
+    const x = p0[0] + (p1[0] - p0[0]) * s / n, y = p0[1] + (p1[1] - p0[1]) * s / n, v = F(x, y);
+    for (const L of levels) if ((prev - L) * (v - L) < 0) {
+      const q = (L - prev) / (v - prev), xs = x - (p1[0] - p0[0]) / n * (1 - q), ys = y - (p1[1] - p0[1]) / n * (1 - q);
+      res.push([xs, ys]);
+    }
+    prev = v;
+  }
+  return res;
+}
+/* Wie contourPath, aber die Einzelstrecken werden zu durchgehenden Linien verkettet (nötig für Strichlierung) */
+function contourPolylines(F, x0, y0, x1, y1, h, levels, Vpre) {
+  const raw = contourPath(F, x0, y0, x1, y1, h, levels, Vpre);
+  const segs = [], ends = new Map();
+  const re = /M([-\d.]+),([-\d.]+)L([-\d.]+),([-\d.]+)/g; let m;
+  while ((m = re.exec(raw))) {
+    const a = m[1] + "," + m[2], b = m[3] + "," + m[4], i = segs.length;
+    segs.push([a, b, false]);
+    for (const k of [a, b]) { if (!ends.has(k)) ends.set(k, []); ends.get(k).push(i); }
+  }
+  const out = [];
+  const nextFrom = (k, skip) => { for (const j of ends.get(k) || []) if (!segs[j][2] && j !== skip) return j; return -1; };
+  for (let i = 0; i < segs.length; i++) {
+    if (segs[i][2]) continue;
+    segs[i][2] = true;
+    const line = [segs[i][0], segs[i][1]];
+    for (const dir of [1, 0]) {                 // erst nach vorn, dann nach hinten verlängern
+      let k = dir ? line[line.length - 1] : line[0], j;
+      while ((j = nextFrom(k, -1)) >= 0) {
+        segs[j][2] = true;
+        const nk = segs[j][0] === k ? segs[j][1] : segs[j][0];
+        if (dir) line.push(nk); else line.unshift(nk);
+        k = nk;
+      }
+    }
+    out.push("M" + line.join("L"));
+  }
+  return out.join("");
+}
+
+/* ================= Ablauf ================= */
+const LOOP = 36;
+const PH = [
+  { t: 0,  txt: "Strom nur im Leiter über dem Magneten" },
+  { t: 5,  txt: "Die Kraft schiebt ihn weiter – der Rotor dreht sich" },
+  { t: 10, txt: "Bürste auf der Fuge: Der Kontakt wechselt" },
+  { t: 17, txt: "Leiter 2 hat den Strom – Kraft wieder nach rechts" },
+  { t: 24, txt: "Der Strom wechselt, die Kraft bleibt: Er dreht dauernd" },
+  { t: 30, txt: "Strom aus – er läuft aus" },
+];
+const curOn = t => t >= 0.6 && t < 30;
+/* Drehzahl in °/s, positiv = gegen den Uhrzeigersinn (Blick von links entlang der Achse, wie Tafel 3) */
+function wRaw(t) {
+  if (t < 0.6) return 0;
+  if (t < 5) return ramp(0, 2.5, 0.6, 5, t);
+  if (t < 10) return ramp(2.5, 1.6, 8, 10, t);
+  if (t < 17) return 1.6;
+  if (t < 24) return ramp(1.6, 6, 17, 24, t);
+  if (t < 27) return ramp(6, 160, 24, 27, t);
+  if (t < 30) return 160;
+  if (t < 35) return ramp(160, 0, 30, 35, t);
+  return 0;
+}
+/* Winkeltabelle; der schnelle Teil ab 24 s wird so skaliert, dass der Rotor nach ganzen Umdrehungen stehen bleibt */
+const DT = 0.005, NT = Math.round(LOOP / DT) + 1, ANG = new Float64Array(NT);
+(() => {
+  let a1 = 0, a2 = 0;
+  for (let i = 0; i < NT - 1; i++) { const t = (i + 0.5) * DT, w = wRaw(t) * DT; if (t < 24) a1 += w; else a2 += w; }
+  const k = (Math.round((a1 + a2) / 360) * 360 - a1) / a2;
+  for (let i = 1; i < NT; i++) { const t = (i - 0.5) * DT; ANG[i] = ANG[i - 1] + wRaw(t) * DT * (t < 24 ? 1 : k); }
+})();
+const angAt = t => { const x = Math.max(0, Math.min(NT - 1.001, t / DT)), i = Math.floor(x); return ANG[i] + (ANG[i + 1] - ANG[i]) * (x - i); };
+
+/* ================= Geometrie ================= */
+const CX = 640, CY = 610, R = 215, RL = 28, RC0 = 60, RC1 = 118, N = 8;
+const GAP = 2, BR = 4;                   // halbe Fugenbreite und halbe Bürstenbreite in Grad
+const MT = CY + R + 48;                  // Oberkante Magnet
+const pol = (r, deg) => [CX + r * Math.cos(rad(deg)), CY - r * Math.sin(rad(deg))];
+const condAng = (k, psi) => 270 - k * 45 + psi;       // Leiter k (0 = „1“) startet unten, Nummern im Uhrzeigersinn
+const norm = a => ((a % 360) + 360) % 360;
+/* Anteil jeder Lamelle am Bürstenkontakt (Bürste unten bei 270°) */
+function contact(psi) {
+  const w = new Array(N).fill(0); let sum = 0;
+  for (let k = 0; k < N; k++) {
+    const c = norm(condAng(k, psi) - 270 + 180) - 180;          // Lage der Lamellenmitte relativ zur Bürste
+    const lo = Math.max(c - 22.5 + GAP, -BR), hi = Math.min(c + 22.5 - GAP, BR);
+    if (hi > lo) { w[k] = hi - lo; sum += w[k]; }
+  }
+  return sum > 0 ? w.map(x => x / sum) : w;
+}
+
+/* ================= Bühne ================= */
+const st = $("stage");
+const defs = el(st, "defs", {});
+const grad = el(defs, "linearGradient", { id: "fg", gradientUnits: "userSpaceOnUse", x1: 0, y1: CY + 110, x2: 0, y2: CY + 210 });
+el(grad, "stop", { offset: 0, "stop-color": "#000" }); el(grad, "stop", { offset: 1, "stop-color": "#fff" });
+const mask = el(defs, "mask", { id: "fm", maskUnits: "userSpaceOnUse", x: 0, y: 0, width: 1920, height: 1080 });
+el(mask, "rect", { x: CX - 320, y: CY + 110, width: 640, height: MT - CY - 110, fill: "url(#fg)" });
+el(st, "text", { x: 60, y: 350, class: "labs" }, "Blick von links entlang der Achse");
+el(st, "circle", { cx: CX, cy: CY, r: R + 30, fill: "#F3F4F1", stroke: "#9AA0A6", "stroke-width": 4 });
+el(st, "circle", { cx: CX, cy: CY, r: R, fill: "none", stroke: "#D8DBD3", "stroke-width": 3, "stroke-dasharray": "10 12" });
+/* Magnet unten, N oben */
+el(st, "rect", { x: CX - 300, y: MT, width: 600, height: 34, fill: "#4A4D52" });
+el(st, "rect", { x: CX - 300, y: MT + 34, width: 600, height: 34, fill: "#CDD1D6" });
+el(st, "text", { x: CX - 270, y: MT + 29, class: "labb", style: "fill:#fff;font-size:34px" }, "N");
+el(st, "text", { x: CX - 270, y: MT + 64, class: "labb", style: "font-size:34px" }, "S");
+el(st, "text", { x: CX + 320, y: MT + 50, class: "lab" }, "Magnet");
+const fieldG = el(st, "g", { mask: "url(#fm)" });
+const linesP = el(fieldG, "path", { fill: "none", stroke: "#2E9B3A", "stroke-width": 5, "stroke-linecap": "round" });
+const headsP = el(st, "path", { fill: "#2E9B3A" });
+el(st, "text", { x: CX - 250, y: MT - 30, class: "vB", "text-anchor": "middle" }, "B");
+const rotor = el(st, "g", {});
+const brush = el(st, "g", {});
+el(brush, "rect", { x: CX - 24, y: CY + RC1 + 2, width: 48, height: 78, rx: 6, fill: "#D4A93A", stroke: "#8C6D1E", "stroke-width": 3 });
+const brushT = el(brush, "text", { x: CX, y: CY + RC1 + 56, "text-anchor": "middle", class: "labb", style: "font-size:44px" }, "+");
+const forceG = el(st, "g", {});
+const rotArc = el(st, "path", { fill: "none", stroke: "#595B60", "stroke-width": 9, "stroke-linecap": "round" });
+const rotHead = el(st, "path", { fill: "#595B60" });
+const leader = (tx, ty, px, py, txt) => {
+  el(st, "line", { x1: tx + 12, y1: ty - 12, x2: px, y2: py, stroke: "#9AA0A6", "stroke-width": 2 });
+  el(st, "text", { x: tx, y: ty, class: "lab", "text-anchor": "end" }, txt);
+};
+{ const q = pol(R, 158); leader(300, 470, q[0] - 4, q[1], "Leiter"); }
+leader(300, 610, CX - RC1 + 6, CY + 20, "Kommutator");
+leader(300, 760, CX - 26, CY + RC1 + 48, "Bürste");
+
+/* rechte Spalte: Zustand und Formel */
+const rc = el(st, "g", {});
+el(rc, "rect", { x: 1100, y: 330, width: 760, height: 420, rx: 24, fill: "#F3F4F1" });
+el(rc, "text", { x: 1140, y: 392, class: "labs" }, "Die Bürste berührt");
+const sLam = el(rc, "text", { x: 1140, y: 470, style: "font:700 66px Bahnschrift,'Roboto Condensed','sans-serif-condensed','Segoe UI',sans-serif;fill:#1F2124" });
+const sCur = el(rc, "text", { x: 1140, y: 560, class: "lab", style: "font-size:46px" });
+const sCur2 = el(rc, "text", { x: 1140, y: 618, class: "lab", style: "font-size:46px" });
+const sF = el(rc, "text", { x: 1140, y: 704, class: "lab", style: "font-size:46px" }, "Kraft: immer nach rechts");
+const sFa = el(rc, "path", { d: arrowD(1680, 688, 1800, 688, 12, 40, 36), fill: "#000" });
+el(rc, "rect", { x: 1100, y: 780, width: 760, height: 210, rx: 24, fill: "#F3F4F1" });
+el(rc, "text", { x: 1480, y: 870, class: "math", "text-anchor": "middle" }).innerHTML = "M = F · r";
+el(rc, "text", { x: 1480, y: 940, class: "labs", "text-anchor": "middle" }, "Drehmoment = Kraft × Hebelarm");
+legend([["cur", "Strom I"], ["fld", "Magnetfeld B"], ["frc", "Kraft F"], ["move", "Drehrichtung"]]);
+
+/* ================= Zeichnen ================= */
+const KM = 80, DL = 60, R0 = 300, B0 = 1;
+const LEVELS = []; for (let j = -8; j <= 7; j++) LEVELS.push((j + 0.5) * DL);
+const A = {
+  reset() {}, step() {},
+  draw(t) {
+    const psi = angAt(t), on = curOn(t), w = (angAt(t + 0.02) - angAt(Math.max(0, t - 0.02))) / 0.04;
+    const share = on ? contact(psi) : new Array(N).fill(0);
+    // Rotor: Lamellen, Verbindungen, Leiter
+    let h = "";
+    for (let k = 0; k < N; k++) {
+      const a = condAng(k, psi), i = share[k];
+      const o0 = pol(RC1, a - 22.5 + GAP), o1 = pol(RC1, a + 22.5 - GAP), i1 = pol(RC0, a + 22.5 - GAP), i0 = pol(RC0, a - 22.5 + GAP);
+      h += `<path d="M${f1(o0[0])},${f1(o0[1])}A${RC1},${RC1} 0 0 0 ${f1(o1[0])},${f1(o1[1])}L${f1(i1[0])},${f1(i1[1])}A${RC0},${RC0} 0 0 1 ${f1(i0[0])},${f1(i0[1])}Z" fill="${i > 0 ? "#E8B585" : "#B8733A"}" stroke="${i > 0 ? "#D7261E" : "#7A4A22"}" stroke-width="${i > 0 ? 6 : 2}"/>`;
+      const c0 = pol(RC1 + 2, a), c1 = pol(R - RL - 2, a);
+      h += `<line x1="${f1(c0[0])}" y1="${f1(c0[1])}" x2="${f1(c1[0])}" y2="${f1(c1[1])}" stroke="${i > 0 ? "#D7261E" : "#B7BCC1"}" stroke-width="${i > 0 ? 7 : 3}"/>`;
+      const ln = pol((RC0 + RC1) / 2, a);
+      h += `<text x="${f1(ln[0])}" y="${f1(ln[1] + 11)}" text-anchor="middle" style="font:700 30px Bahnschrift,'Roboto Condensed','sans-serif-condensed','Segoe UI',sans-serif;fill:#3D2410">${k + 1}</text>`;
+    }
+    h += `<circle cx="${CX}" cy="${CY}" r="${RC0 - 6}" fill="#fff" stroke="#9AA0A6" stroke-width="3"/><circle cx="${CX}" cy="${CY}" r="18" fill="#595B60"/>`;
+    for (let k = 0; k < N; k++) {
+      const a = condAng(k, psi), i = share[k], c = pol(R, a), nlab = pol(R - 58, a + 9);
+      h += `<circle cx="${f1(c[0])}" cy="${f1(c[1])}" r="${RL}" fill="#B8733A" stroke="#7A4A22" stroke-width="3"/>`;
+      if (i > 0) h += `<circle cx="${f1(c[0])}" cy="${f1(c[1])}" r="${RL - 8}" fill="#fff"/><path d="${crossD(c[0], c[1], (RL - 8) * Math.max(0.55, Math.sqrt(i)))}" stroke="#D7261E" stroke-width="6" stroke-linecap="round"/>`;
+      h += `<text x="${f1(nlab[0])}" y="${f1(nlab[1] + 13)}" text-anchor="middle" style="font:700 38px Bahnschrift,'Roboto Condensed','sans-serif-condensed','Segoe UI',sans-serif;fill:${i > 0 ? "#D7261E" : "#595B60"};paint-order:stroke;stroke:#F3F4F1;stroke-width:10px">${k + 1}</text>`;
+    }
+    rotor.innerHTML = h;
+    // Feld des Magneten, verbogen durch die stromführenden Leiter (Höhenlinien wie bei der Lorentzkraft)
+    const act = [];
+    for (let k = 0; k < N; k++) if (share[k] > 0) { const c = pol(R, condAng(k, psi)); act.push([c[0], c[1], -KM * share[k]]); }
+    const F = (x, y) => { let A0 = -B0 * (x - CX); for (const [ax, ay, K] of act) A0 -= K * Math.log(Math.max(4, Math.hypot(x - ax, ay - y)) / R0); return A0; };
+    linesP.setAttribute("d", contourPath(F, CX - 320, CY + 110, CX + 320, MT, 8, LEVELS));
+    let hd = "";
+    for (const [x, y] of crossings(F, [CX - 316, MT - 26], [CX + 316, MT - 26], 400, LEVELS)) {
+      let bu = 0, bv = B0;
+      for (const [ax, ay, K] of act) { const u = x - ax, v = ay - y, r2 = Math.max(16, u * u + v * v); bu += -K * v / r2; bv += K * u / r2; }
+      hd += headD(x, y, bu, -bv, 30, 24);
+    }
+    headsP.setAttribute("d", hd);
+    // Kraft an jedem stromführenden Leiter: ⊗ und Feld nach oben → nach rechts
+    let fh = "";
+    for (const [ax, ay, K] of act) { const L = 190 * (-K / KM); fh += `<path d="${arrowD(ax + RL + 8, ay, ax + RL + 8 + L, ay, 16 * Math.sqrt(-K / KM) + 2, 50, 44)}" fill="#000"/>`; }
+    if (act.length) { const [ax, ay] = act.reduce((p, q) => (q[2] < p[2] ? q : p)); fh += `<text x="${f1(ax + 150)}" y="${f1(ay - 40)}" class="vF" text-anchor="middle">F</text><text x="${f1(ax - 70)}" y="${f1(ay - 34)}" class="vI" text-anchor="middle">I</text>`; }
+    forceG.innerHTML = fh;
+    brushT.style.opacity = on ? 1 : 0.25;
+    // Drehpfeil oben rechts (gegen den Uhrzeigersinn)
+    const sp = clamp01(Math.abs(w) / 1.2);
+    rotArc.style.opacity = rotHead.style.opacity = sp;
+    if (sp > 0.01) {
+      const rr = R + 56, a0 = 22, a1 = 76, p0 = pol(rr, a0), p1 = pol(rr, a1);
+      rotArc.setAttribute("d", `M${f1(p0[0])},${f1(p0[1])}A${rr},${rr} 0 0 0 ${f1(p1[0])},${f1(p1[1])}`);
+      rotHead.setAttribute("d", headD(p1[0] - 14 * Math.sin(rad(a1)), p1[1] - 14 * Math.cos(rad(a1)), -Math.sin(rad(a1)), -Math.cos(rad(a1)), 44, 40));
+    }
+    // Zustandskarte
+    const idx = []; share.forEach((x, k) => { if (x > 0) idx.push(k + 1); });
+    if (!on) { sLam.textContent = "–"; sCur.textContent = "Kein Strom"; sCur2.textContent = ""; }
+    else if (idx.length === 1) { sLam.textContent = "Lamelle " + idx[0]; sCur.textContent = "→ Leiter " + idx[0] + " führt Strom"; sCur2.textContent = ""; }
+    else { sLam.textContent = "Lamelle " + idx.join(" + ") + " (Fuge)"; sCur.textContent = "→ Leiter " + idx.join(" und "); sCur2.textContent = "   teilen sich den Strom"; }
+    sF.style.opacity = sFa.style.opacity = on ? 1 : 0.25;
+  }
+};
+
+/* ================= Abspielen =================
+   Allein geöffnet: Endlosschleife. Mit ?tv (eingebettet in tv.html) steuert die Playlist:
+   Befehle {cmd: "seek", t, play}, {cmd: "play"}, {cmd: "pause"}; die Animation meldet „ready“ (Dauer und Schritte),
+   beim Abspielen laufend „time“ und am Ende „done“ und bleibt dann auf dem letzten Bild stehen.
+   ?t=12 startet bei Sekunde 12, ?t=12&shot zeigt ein Standbild. */
+const Q = new URLSearchParams(location.search);
+const TVMODE = Q.has("tv");
+let T = 0, paused = Q.has("pause") || Q.has("shot") || TVMODE, last = null, capIdx = -1, dirty = true;
+if (Q.has("shot")) document.body.classList.add("shot");
+if (TVMODE) document.body.classList.add("tv");
+const tell = m => { if (TVMODE) { try { parent.postMessage(m, "*"); } catch (e) {} } };
+function phaseAt(t) { let i = 0; while (i + 1 < PH.length && t >= PH[i + 1].t) i++; return i; }
+const STEP = 1 / 240;
+function stepTo(t) { while (T < t - 1e-9) { const d = Math.min(STEP, t - T); A.step(T, d); T += d; } T = t; }
+/* Springen: vorwärts ab der aktuellen Zeit weiterrechnen, rückwärts von vorn */
+function seek(t) { if (t < T) { A.reset(); T = 0; } stepTo(t); dirty = true; }
+function advance(dt) {
+  const target = T + dt;
+  if (target >= LOOP) {
+    if (TVMODE) { stepTo(LOOP - 0.001); setPaused(true); dirty = true; tell({ tv: "done" }); return; }
+    A.reset(); T = 0; stepTo(target - LOOP); return;
+  }
+  stepTo(target);
+}
+const capN = $("capn"), capT = $("capt"), progbar = $("progbar");
+function caption(i, instant) {
+  if (i === capIdx) return; capIdx = i;
+  const set = () => { capN.textContent = i + 1; capT.textContent = PH[i].txt; capT.style.opacity = 1; };
+  if (instant) set(); else { capT.style.opacity = 0; setTimeout(set, 250); }
+}
+PH.slice(1).forEach(p => el($("progticks"), "rect", { x: f1(60 + 1800 * p.t / LOOP - 2), y: 1060, width: 4, height: 8, fill: "#fff" }));
+/* Rechenzeit pro Bild beobachten: Ist das Gerät zu langsam (über 22 ms), wird das Rechenraster gröber (QUAL bis 2),
+   bei viel Reserve (unter 7 ms) wieder feiner. Bilder ohne Neuberechnung (unter 2 ms) zählen nicht.
+   Auf einem normalen PC bleibt QUAL = 1. */
+let cost = 0, costN = 0;
+function measure(ms) {
+  if (paused || ms < 2) return;
+  cost = costN < 6 ? (cost * costN + ms) / (costN + 1) : cost * 0.85 + ms * 0.15; costN++;
+  if (costN < 8) return;
+  if (cost > 22 && QUAL < 2) { QUAL = Math.min(2, QUAL * 1.25); costN = 0; }
+  else if (cost < 7 && QUAL > 1) { QUAL = Math.max(1, QUAL / 1.25); costN = 0; }
+}
+function render(instant) {
+  caption(phaseAt(T), instant); progbar.setAttribute("width", f1(1800 * T / LOOP));
+  const a = performance.now(); A.draw(T); measure(performance.now() - a); dirty = false;
+}
+function frame(now) {
+  if (last != null && !paused) advance(Math.min(0.25, (now - last) / 1000));
+  last = now;
+  if (!paused || dirty) { render(false); if (!paused) tell({ tv: "time", t: T }); }
+  requestAnimationFrame(frame);
+}
+function setPaused(p) { paused = p; document.body.classList.toggle("paused", p); }
+function jump(k) { const i = (phaseAt(T) + k + PH.length) % PH.length; seek(PH[i].t); render(true); }
+function key(k) {
+  if (k === " " || k === "Enter") setPaused(!paused);
+  else if (k === "ArrowRight") jump(1);
+  else if (k === "ArrowLeft") jump(-1);
+}
+addEventListener("keydown", e => {
+  if (TVMODE) { tell({ tv: "key", key: e.key, code: e.keyCode }); e.preventDefault(); return; }
+  if (e.key === "f" || e.key === "F") { const d = document.documentElement; if (!document.fullscreenElement && d.requestFullscreen) d.requestFullscreen().catch(() => {}); else if (document.exitFullscreen) document.exitFullscreen(); return; }
+  key(e.key); if (e.key === " ") e.preventDefault();
+});
+addEventListener("click", () => { if (TVMODE) tell({ tv: "key", key: " " }); else setPaused(!paused); });
+addEventListener("message", e => {
+  const m = e.data || {};
+  if (m.cmd === "pause") setPaused(true);
+  else if (m.cmd === "play") { if (T >= LOOP - 0.01) { seek(0); render(true); } setPaused(false); }
+  else if (m.cmd === "seek") {
+    seek(Math.max(0, Math.min(LOOP - 0.001, +m.t || 0))); render(true); tell({ tv: "time", t: T });
+    if (m.play != null) setPaused(!m.play);
+  }
+  else if (m.cmd === "step") jump(m.dir || 1);
+});
+/* Mauszeiger nach 2 s ohne Bewegung ausblenden */
+let idleT = null;
+addEventListener("mousemove", () => { document.body.classList.remove("idle"); clearTimeout(idleT); idleT = setTimeout(() => document.body.classList.add("idle"), 2000); });
+document.body.classList.add("idle");
+/* Bildschirm wach halten, wo der Browser es erlaubt */
+async function keepAwake() { try { if (!TVMODE && "wakeLock" in navigator && document.visibilityState === "visible") await navigator.wakeLock.request("screen"); } catch (e) {} }
+document.addEventListener("visibilitychange", keepAwake); keepAwake();
+/* grünes Quadrat vor „HTL St. Pölten“ */
+try { const b = $("brand").getComputedTextLength(); $("brandSq").setAttribute("x", f1(1860 - b - 44)); } catch (e) {}
+
+seek(Math.max(0, Math.min(LOOP - 0.001, parseFloat(Q.get("t")) || 0)));
+setPaused(paused);
+render(true);
+tell({ tv: "ready", loop: LOOP, ph: PH.map(p => p.t) });
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

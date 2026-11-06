@@ -1,0 +1,515 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lorentzkraft · TV</title>
+<style>
+  /* TV-Fassung 16:9 (1920 × 1080, skaliert bis 4K). Farbcode wie Stationstafeln v2:
+     Strom rot, Spannung blau, Feld grün, Kraft schwarz, Bewegung grau. Design HTL-Grün, Rot nie als Designfarbe. */
+  :root {
+    --green: #9CCE2B; --green-dark: #6D9037; --grey: #595B60; --ink: #1F2124;
+    --line: #D8DBD3; --tint: #F5FAEA; --fans: #F3F4F1;
+    --cur: #D7261E; --volt: #1F5FBF; --fld: #2E9B3A; --frc: #000000; --move: #595B60;
+    --nord: #4A4D52; --sued: #CDD1D6; --cu: #B8733A;
+  }
+  html, body { margin: 0; height: 100%; background: #fff; overflow: hidden; }
+  body { font-family: "Segoe UI", Arial, sans-serif; color: var(--ink); user-select: none; -webkit-user-select: none; }
+  body.idle { cursor: none; }
+  #tv { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  .kick { font: 600 32px Bahnschrift, "Roboto Condensed", "sans-serif-condensed", "Segoe UI", sans-serif; letter-spacing: .09em; fill: var(--green-dark); }
+  .head { font: 700 80px Bahnschrift, "Roboto Condensed", "sans-serif-condensed", "Segoe UI", sans-serif; fill: var(--ink); }
+  .brand { font: 700 40px Bahnschrift, "Roboto Condensed", "sans-serif-condensed", "Segoe UI", sans-serif; fill: var(--ink); }
+  .brand2 { font: 28px "Segoe UI", Arial, sans-serif; fill: var(--grey); }
+  .capn { font: 700 40px Bahnschrift, "Roboto Condensed", "sans-serif-condensed", "Segoe UI", sans-serif; fill: var(--green-dark); }
+  .capt { font: 600 56px Bahnschrift, "Roboto Condensed", "sans-serif-condensed", "Segoe UI", sans-serif; fill: var(--ink); transition: opacity .3s; }
+  .lab { font: 40px "Segoe UI", Arial, sans-serif; fill: var(--ink); }
+  .labb { font: 700 40px "Segoe UI", Arial, sans-serif; fill: var(--ink); }
+  .labs { font: 32px "Segoe UI", Arial, sans-serif; fill: var(--grey); }
+  .math { font: italic 66px "Cambria Math", Cambria, "Times New Roman", serif; fill: var(--ink); }
+  .vI, .vB, .vF { font: italic 700 64px "Cambria Math", Cambria, serif; paint-order: stroke; stroke: #fff; stroke-width: 12px; stroke-linejoin: round; }
+  .vI { fill: var(--cur); } .vB { fill: var(--fld); } .vF { fill: #000; }
+  .pole { font: 700 56px Bahnschrift, "Roboto Condensed", "sans-serif-condensed", "Segoe UI", sans-serif; }
+  .legend { font: 30px "Segoe UI", Arial, sans-serif; fill: var(--grey); }
+  .fade { transition: opacity .3s; }
+  #pause { display: none; }
+  body.paused:not(.shot):not(.tv) #pause { display: inline; }   /* in tv.html zeigt die Playlist die Pause an */
+</style>
+</head>
+<body>
+<svg id="tv" viewBox="0 0 1920 1080" preserveAspectRatio="xMidYMid meet" aria-label="Lorentzkraft · TV">
+  <rect width="1920" height="1080" fill="#fff"/>
+  <rect x="60" y="40" width="124" height="124" rx="26" fill="#9CCE2B"/>
+  <text x="122" y="131" text-anchor="middle" style="font:700 86px Bahnschrift,'Roboto Condensed','sans-serif-condensed','Segoe UI',sans-serif;fill:#1F2124">2</text>
+  <text x="214" y="80" class="kick">STROM + MAGNETFELD = KRAFT · STATION 2</text>
+  <text x="210" y="156" class="head">Die Lorentzkraft</text>
+  <text id="brand" x="1860" y="96" text-anchor="end" class="brand">HTL St. Pölten</text>
+  <rect id="brandSq" x="1560" y="66" width="30" height="30" rx="6" fill="#9CCE2B"/>
+  <text x="1860" y="136" text-anchor="end" class="brand2">Abteilung Elektrotechnik</text>
+  <rect x="60" y="190" width="1800" height="9" fill="#9CCE2B"/>
+  <circle cx="98" cy="262" r="34" fill="none" stroke="#6D9037" stroke-width="6"/>
+  <text id="capn" x="98" y="276" text-anchor="middle" class="capn"></text>
+  <text id="capt" x="156" y="282" class="capt"></text>
+  <g id="stage"></g>
+  <g id="legend"></g>
+  <rect x="60" y="1060" width="1800" height="8" rx="4" fill="#F3F4F1"/>
+  <rect id="progbar" x="60" y="1060" width="0" height="8" rx="4" fill="#9CCE2B"/>
+  <g id="progticks"></g>
+  <g id="pause"><rect x="1636" y="226" width="224" height="72" rx="36" fill="#1F2124" opacity=".85"/>
+    <rect x="1668" y="246" width="10" height="32" rx="2" fill="#fff"/><rect x="1686" y="246" width="10" height="32" rx="2" fill="#fff"/>
+    <text x="1712" y="275" style="font:600 36px Bahnschrift,'Roboto Condensed','sans-serif-condensed','Segoe UI',sans-serif;fill:#fff">Pause</text></g>
+</svg>
+<script>
+"use strict";
+/* ================= Hilfsfunktionen ================= */
+const NS = "http://www.w3.org/2000/svg";
+const $ = id => document.getElementById(id);
+function el(parent, tag, attrs, text) {
+  const e = document.createElementNS(NS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  if (text != null) e.textContent = text;
+  parent.appendChild(e);
+  return e;
+}
+const f1 = v => (Math.round(v * 10) / 10).toString();
+const pts = a => a.map(p => f1(p[0]) + "," + f1(p[1])).join(" ");
+const poly = a => "M" + a.map(p => f1(p[0]) + "," + f1(p[1])).join("L") + "Z";
+const PI = Math.PI, rad = d => d * PI / 180;
+const smooth = x => (x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x));
+const clamp01 = x => Math.max(0, Math.min(1, x));
+const ramp = (a, b, t0, t1, t) => a + (b - a) * smooth((t - t0) / (t1 - t0));
+/* Pfeil als gefüllte Fläche: Schaftbreite w, Spitzenbreite hw, Spitzenlänge hl */
+function arrowD(x1, y1, x2, y2, w, hw, hl) {
+  const dx = x2 - x1, dy = y2 - y1, L = Math.hypot(dx, dy) || 1, ux = dx / L, uy = dy / L, nx = -uy, ny = ux;
+  hl = Math.min(hl, L * 0.7);
+  const bx = x2 - ux * hl, by = y2 - uy * hl;
+  return poly([[x1 + nx * w / 2, y1 + ny * w / 2], [bx + nx * w / 2, by + ny * w / 2], [bx + nx * hw / 2, by + ny * hw / 2], [x2, y2],
+               [bx - nx * hw / 2, by - ny * hw / 2], [bx - nx * w / 2, by - ny * w / 2], [x1 - nx * w / 2, y1 - ny * w / 2]]);
+}
+/* kleine Pfeilspitze an (x, y) in Richtung (dx, dy) */
+function headD(x, y, dx, dy, len, wid) {
+  const L = Math.hypot(dx, dy) || 1, ux = dx / L, uy = dy / L, nx = -uy, ny = ux;
+  return poly([[x + ux * len / 2, y + uy * len / 2], [x - ux * len / 2 + nx * wid / 2, y - uy * len / 2 + ny * wid / 2], [x - ux * len / 2 - nx * wid / 2, y - uy * len / 2 - ny * wid / 2]]);
+}
+/* Symbole für Strom senkrecht zur Bildebene: ⊗ hinein, ⊙ heraus */
+function crossD(x, y, r) { const a = r * 0.62; return `M${f1(x - a)},${f1(y - a)}L${f1(x + a)},${f1(y + a)}M${f1(x + a)},${f1(y - a)}L${f1(x - a)},${f1(y + a)}`; }
+/* Legende unten: [Art, Text]; Art = cur | volt | fld | frc | move */
+function legend(items) {
+  const g = $("legend"); let x = 60;
+  const col = { cur: "#D7261E", volt: "#1F5FBF", fld: "#2E9B3A", frc: "#000", frc0: "#fff", move: "#595B60" };
+  for (const [k, txt] of items) {
+    const f = k === "frc" || k === "frc0", w = f ? 9 : 5, c = col[k];   // frc0: hohler Kraftpfeil (Gegenkraft)
+    el(g, "path", { d: arrowD(x, 1028, x + 64, 1028, w, f ? 26 : 20, f ? 24 : 18), fill: c,
+                    ...(k === "frc0" ? { stroke: "#000", "stroke-width": 3, "stroke-linejoin": "round" } : {}) });
+    const t = el(g, "text", { x: x + 78, y: 1039, class: "legend" }, txt);
+    x += 78 + txt.length * 15 + 56;
+  }
+}
+/* Rechenqualität: 1 = volle Auflösung. Auf langsamen Geräten (z. B. Android-TV) setzt der Player QUAL bis auf 2 hoch,
+   dann rechnen Höhenlinien und Feldpfeile auf einem gröberen Raster (etwa ein Viertel der Rechenzeit). */
+let QUAL = 1;
+/* Höhenlinien (Marching Squares) einer Funktion F(x, y) auf dem Raster h; levels aufsteigend sortiert.
+   Liefert einen Pfad aus Einzelstrecken (mit runden Linienenden sieht das wie durchgehende Linien aus).
+   Optional: Vpre = schon berechnete Rasterwerte (Zeile für Zeile, (nx+1)·(ny+1) Werte). */
+function contourPath(F, x0, y0, x1, y1, h, levels, Vpre) {
+  if (!Vpre) h *= QUAL;
+  const nx = Math.ceil((x1 - x0) / h), ny = Math.ceil((y1 - y0) / h), W = nx + 1;
+  const V = Vpre || new Float64Array(W * (ny + 1));
+  if (!Vpre) for (let j = 0; j <= ny; j++) for (let i = 0; i <= nx; i++) V[j * W + i] = F(x0 + i * h, y0 + j * h);
+  // schnelle Fassung (wichtig für langsame Geräte): keine Hilfsfunktionen und Arrays pro Zelle, Text direkt anhängen
+  let out = "";
+  const nL = levels.length, r = v => Math.round(v * 10) / 10;
+  const seg = (ax, ay, bx, by) => { out += "M" + r(ax) + "," + r(ay) + "L" + r(bx) + "," + r(by); };
+  for (let j = 0; j < ny; j++) {
+    const Y = y0 + j * h, row = j * W;
+    for (let i = 0; i < nx; i++) {
+      const a = V[row + i], b = V[row + i + 1], c = V[row + W + i + 1], d = V[row + W + i];
+      const mn = Math.min(a, b, c, d), mx = Math.max(a, b, c, d);
+      if (!isFinite(mn) || !isFinite(mx)) continue;
+      let lo = 0, hi = nL;
+      while (lo < hi) { const m = (lo + hi) >> 1; if (levels[m] < mn) lo = m + 1; else hi = m; }
+      if (lo >= nL || levels[lo] > mx) continue;
+      const X = x0 + i * h;
+      for (let k = lo; k < nL && levels[k] <= mx; k++) {
+        const L = levels[k];
+        const code = (a > L ? 8 : 0) | (b > L ? 4 : 0) | (c > L ? 2 : 0) | (d > L ? 1 : 0);
+        if (code === 0 || code === 15) continue;
+        // Schnittpunkte auf den Kanten oben (a–b), rechts (b–c), unten (d–c), links (a–d)
+        switch (code) {
+          case 1: case 14: seg(X, Y + h * (L - a) / (d - a), X + h * (L - d) / (c - d), Y + h); break;
+          case 2: case 13: seg(X + h * (L - d) / (c - d), Y + h, X + h, Y + h * (L - b) / (c - b)); break;
+          case 3: case 12: seg(X, Y + h * (L - a) / (d - a), X + h, Y + h * (L - b) / (c - b)); break;
+          case 4: case 11: seg(X + h * (L - a) / (b - a), Y, X + h, Y + h * (L - b) / (c - b)); break;
+          case 6: case 9: seg(X + h * (L - a) / (b - a), Y, X + h * (L - d) / (c - d), Y + h); break;
+          case 7: case 8: seg(X, Y + h * (L - a) / (d - a), X + h * (L - a) / (b - a), Y); break;
+          case 5: seg(X, Y + h * (L - a) / (d - a), X + h * (L - a) / (b - a), Y);
+                  seg(X + h * (L - d) / (c - d), Y + h, X + h, Y + h * (L - b) / (c - b)); break;
+          case 10: seg(X + h * (L - a) / (b - a), Y, X + h, Y + h * (L - b) / (c - b));
+                   seg(X, Y + h * (L - a) / (d - a), X + h * (L - d) / (c - d), Y + h); break;
+        }
+      }
+    }
+  }
+  return out;
+}
+/* Kreuzungspunkte einer Höhenlinie mit einer Strecke (für Feldpfeile) */
+function crossings(F, p0, p1, n, levels) {
+  n = Math.max(20, Math.round(n / QUAL));
+  const res = []; let prev = F(p0[0], p0[1]);
+  for (let s = 1; s <= n; s++) {
+    const x = p0[0] + (p1[0] - p0[0]) * s / n, y = p0[1] + (p1[1] - p0[1]) * s / n, v = F(x, y);
+    for (const L of levels) if ((prev - L) * (v - L) < 0) {
+      const q = (L - prev) / (v - prev), xs = x - (p1[0] - p0[0]) / n * (1 - q), ys = y - (p1[1] - p0[1]) / n * (1 - q);
+      res.push([xs, ys]);
+    }
+    prev = v;
+  }
+  return res;
+}
+/* Wie contourPath, aber die Einzelstrecken werden zu durchgehenden Linien verkettet (nötig für Strichlierung) */
+function contourPolylines(F, x0, y0, x1, y1, h, levels, Vpre) {
+  const raw = contourPath(F, x0, y0, x1, y1, h, levels, Vpre);
+  const segs = [], ends = new Map();
+  const re = /M([-\d.]+),([-\d.]+)L([-\d.]+),([-\d.]+)/g; let m;
+  while ((m = re.exec(raw))) {
+    const a = m[1] + "," + m[2], b = m[3] + "," + m[4], i = segs.length;
+    segs.push([a, b, false]);
+    for (const k of [a, b]) { if (!ends.has(k)) ends.set(k, []); ends.get(k).push(i); }
+  }
+  const out = [];
+  const nextFrom = (k, skip) => { for (const j of ends.get(k) || []) if (!segs[j][2] && j !== skip) return j; return -1; };
+  for (let i = 0; i < segs.length; i++) {
+    if (segs[i][2]) continue;
+    segs[i][2] = true;
+    const line = [segs[i][0], segs[i][1]];
+    for (const dir of [1, 0]) {                 // erst nach vorn, dann nach hinten verlängern
+      let k = dir ? line[line.length - 1] : line[0], j;
+      while ((j = nextFrom(k, -1)) >= 0) {
+        segs[j][2] = true;
+        const nk = segs[j][0] === k ? segs[j][1] : segs[j][0];
+        if (dir) line.push(nk); else line.unshift(nk);
+        k = nk;
+      }
+    }
+    out.push("M" + line.join("L"));
+  }
+  return out.join("");
+}
+
+/* ================= Ablauf ================= */
+const LOOP = 49;
+const PH = [
+  { t: 0,  txt: "Nur der Magnet: gerade Feldlinien von N nach S" },
+  { t: 6,  txt: "Nur der Strom: Kreise um den Leiter" },
+  { t: 13, txt: "Beides zusammen: Die Feldlinien verbiegen sich" },
+  { t: 20, txt: "Gummibänder wollen kurz sein – das ergibt die Kraft F" },
+  { t: 27, txt: "Loslassen: Die Kraft schiebt den Leiter zur Seite" },
+  { t: 32, txt: "Die Schaukel hält dagegen: Gegenkraft = F, Stillstand" },
+  { t: 36, txt: "Strom umgepolt: Kraft und Bewegung andersherum" },
+  { t: 43, txt: "Strom aus: Die Gegenkraft holt den Leiter zurück" },
+];
+/* Feld im Querschnitt, Blick von links entlang des Leiters (wie Tafel 2):
+   homogenes Feld B0 nach oben (N unten, S oben) + Feld des Leiters.
+   Feldlinien = Höhenlinien von A = −B0·u − K·G(u, v); K < 0: Strom in die Ebene hinein (⊗) → Leiterfeld im Uhrzeigersinn.
+   Zwischen den Polen ist G die Greensche Funktion des Streifens |v| < h (Spiegelströme): G = 0 auf beiden Polflächen, die
+   Flussdichte dort bleibt also überall B0 und die Linien behalten ihre Fußpunkte (bewusst vereinfacht, wie gewünscht).
+   Leiter in der Mitte: G = ln|tanh(π(u + iv)/4h)|; hebt ihn die Schaukel um v0, gilt die allgemeine Form (siehe G). Ohne Magnet: G = ln(r/r0).
+   B = (∂A/∂v, −∂A/∂u): links vom Leiter addieren sich die Felder, rechts heben sie sich teilweise auf → Kraft nach rechts. */
+const KM = 100, DL = 72, R0 = 300;                 // K in px·B0, Linienabstand 72 px
+const LEVELS = []; for (let j = -16; j <= 15; j++) LEVELS.push((j + 0.5) * DL);
+const HG = (928 - 392) / 2;                      // halber Polabstand
+function G(u, v, free, v0) {
+  if (free) return Math.log(Math.max(4, Math.hypot(u, v - v0)) / R0);
+  // Streifen auf die obere Halbebene abbilden: ζ = exp(π(z + i·h)/2h); Leiter bei ζ0, Spiegelstrom bei conj(ζ0)
+  const k = PI / (2 * HG), m = Math.exp(k * u), a = k * (v + HG), a0 = k * (v0 + HG);
+  const zr = m * Math.cos(a) - Math.cos(a0), zi = m * Math.sin(a), s0 = Math.sin(a0);
+  return 0.5 * Math.log(Math.max(1e-6, (zr * zr + (zi - s0) ** 2) / (zr * zr + (zi + s0) ** 2)));
+}
+function params(t) {
+  if (t < 6.4) return { B0: 1, K: 0, op: t < 6 ? 1 : 1 - (t - 6) / 0.4, mag: t < 6 ? 1 : 1 - 0.85 * (t - 6) / 0.4, only: false };
+  if (t < 13) return { B0: 0, K: -KM, op: Math.min(clamp01((t - 6.4) / 0.4), 1 - clamp01((t - 12.6) / 0.4)), mag: t < 12.6 ? 0.15 : 0.15 + 0.85 * (t - 12.6) / 0.4, only: true };
+  let K = 0;
+  if (t < 14) K = 0;
+  else if (t < 18.5) K = ramp(0, -KM, 14, 18.5, t);
+  else if (t < 36) K = -KM;
+  else if (t < 39.5) K = ramp(-KM, KM, 36, 39.5, t);
+  else if (t < 43) K = KM;
+  else K = ramp(KM, 0, 43, 45.5, t);
+  return { B0: 1, K, op: clamp01((t - 13) / 0.4), mag: 1, only: false };
+}
+
+/* ================= Bühne ================= */
+const st = $("stage");
+const PX0 = 60, PX1 = 1300, PY0 = 320, PY1 = 1000, FY0 = 392, FY1 = 928, XC = 680, YC = 660, RC = 32;
+const defs = el(st, "defs", {});
+const cpF = el(defs, "clipPath", { id: "cpField" }); el(cpF, "rect", { x: PX0 + 2, y: FY0, width: PX1 - PX0 - 4, height: FY1 - FY0 });
+const cpP = el(defs, "clipPath", { id: "cpPanel" }); el(cpP, "rect", { x: PX0 + 2, y: PY0 + 2, width: PX1 - PX0 - 4, height: PY1 - PY0 - 4, rx: 20 });
+el(st, "rect", { x: PX0, y: PY0, width: PX1 - PX0, height: PY1 - PY0, rx: 22, fill: "#fff", stroke: "#D8DBD3", "stroke-width": 3 });
+const magG = el(st, "g", {});
+el(magG, "rect", { x: PX0 + 2, y: PY0 + 2, width: PX1 - PX0 - 4, height: FY0 - PY0 - 2, fill: "#CDD1D6" });
+el(magG, "rect", { x: PX0 + 2, y: FY1, width: PX1 - PX0 - 4, height: PY1 - FY1 - 2, fill: "#4A4D52" });
+el(magG, "text", { x: PX0 + 34, y: FY0 - 16, class: "pole", style: "fill:#1F2124" }, "S");
+el(magG, "text", { x: PX0 + 34, y: PY1 - 18, class: "pole", style: "fill:#fff" }, "N");
+el(magG, "text", { x: PX1 - 30, y: PY1 - 22, class: "labs", "text-anchor": "end", style: "fill:#fff" }, "Blick von links entlang des Leiters");
+const fieldG = el(st, "g", {});
+const linesP = el(fieldG, "path", { fill: "none", stroke: "#2E9B3A", "stroke-width": 5, "stroke-linecap": "round" });
+const hiP = el(fieldG, "path", { fill: "none", stroke: "#1F7A2B", "stroke-width": 10, "stroke-linecap": "round" });
+const headsP = el(fieldG, "path", { fill: "#2E9B3A" });
+const bLab = el(st, "text", { x: PX0 + 70, y: FY0 + 92, class: "vB" }, "B");
+/* Schaukel: Aufhängung (Drähte vorn und hinten, von der Seite gesehen eine Linie) zur Drehachse weit über dem Bild */
+const LW = 900;                                   // Pendellänge in px, Drehachse bei (XC, YC − LW)
+const wire = el(st, "line", { x2: XC, y2: YC - LW, stroke: "#8A5326", "stroke-width": 6, "stroke-linecap": "round", "clip-path": "url(#cpPanel)" });
+/* Halter: hält den Leiter bis „Loslassen“ fest */
+const holdG = el(st, "g", {});
+{ const R = RC + 9, c = Math.cos(PI / 9) * R, s = Math.sin(PI / 9) * R;
+  el(holdG, "rect", { x: -9, y: R + 2, width: 18, height: 300, rx: 6, fill: "#9AA0A6" });
+  el(holdG, "path", { d: `M${f1(-c)},${f1(s)}A${R},${R} 0 0 0 ${f1(c)},${f1(s)}`, fill: "none", stroke: "#9AA0A6", "stroke-width": 12, "stroke-linecap": "round" });
+  el(holdG, "text", { x: 24, y: 210, class: "labs", style: "fill:#595B60;paint-order:stroke;stroke:#fff;stroke-width:8px" }, "Halter"); }
+/* Leiter */
+const condG = el(st, "g", {});
+el(condG, "circle", { r: RC, fill: "#B8733A", stroke: "#8A5326", "stroke-width": 3 });
+const condIn = el(condG, "circle", { r: RC - 9, fill: "#fff" });
+const condSym = el(condG, "path", { fill: "none", stroke: "#D7261E", "stroke-width": 7, "stroke-linecap": "round" });
+const condDot = el(condG, "circle", { r: 8, fill: "#D7261E" });
+const iLab = el(st, "text", { class: "vI", "text-anchor": "middle" }, "I");
+const fArr = el(st, "path", { fill: "#000" });
+const fLab = el(st, "text", { class: "vF", "text-anchor": "middle" }, "F");
+/* Gegenkraft (hohler Pfeil): erst vom Halter, nach dem Loslassen von der ausgelenkten Schaukel (∝ Auslenkung) */
+const gArr = el(st, "path", { fill: "#fff", stroke: "#000", "stroke-width": 5, "stroke-linejoin": "round" });
+const gLab = el(st, "text", { class: "lab", "text-anchor": "middle", style: "paint-order:stroke;stroke:#fff;stroke-width:10px" }, "Gegenkraft");
+
+/* rechte Spalte: Formel und Gummiband-Bild */
+const rc = el(st, "g", {});
+el(rc, "rect", { x: 1360, y: PY0, width: 500, height: 210, rx: 22, fill: "#F3F4F1" });
+el(rc, "text", { x: 1610, y: PY0 + 92, class: "math", "text-anchor": "middle" }).innerHTML = "F = I · l · B";
+el(rc, "text", { x: 1610, y: PY0 + 146, class: "labs", "text-anchor": "middle" }, "Strom × Leiterlänge × Feld");
+el(rc, "text", { x: 1610, y: PY0 + 186, class: "labs", "text-anchor": "middle" }, "10 A · 5 cm · 0,3 T ≈ 0,15 N");
+const sling = el(st, "g", {});
+const SX = 1700, SY0 = 610, SY1 = 900, SYM = (SY0 + SY1) / 2;
+el(sling, "text", { x: 1610, y: 588, class: "lab", "text-anchor": "middle" }, "wie ein Gummiband");
+const band = el(sling, "path", { fill: "none", stroke: "#2E9B3A", "stroke-width": 10, "stroke-linecap": "round" });
+for (const y of [SY0, SY1]) { el(sling, "rect", { x: SX - 40, y: y - 9, width: 80, height: 18, rx: 9, fill: "#9AA0A6" }); el(sling, "circle", { cx: SX, cy: y, r: 13, fill: "#595B60" }); }
+const ball = el(sling, "g", {});
+el(ball, "circle", { r: 26, fill: "#B8733A", stroke: "#8A5326", "stroke-width": 3 });
+el(ball, "circle", { r: 18, fill: "#fff" });
+const ballSym = el(ball, "path", { fill: "none", stroke: "#D7261E", "stroke-width": 5, "stroke-linecap": "round" });
+const ballDot = el(ball, "circle", { r: 6, fill: "#D7261E" });
+const sF = el(sling, "path", { fill: "#000" });
+const slingTxt = el(sling, "text", { x: 1610, y: 966, class: "labs", "text-anchor": "middle" }, "will kurz sein → Kraft");
+legend([["cur", "Strom I"], ["fld", "Magnetfeld B"], ["frc", "Kraft F"], ["frc0", "Gegenkraft"], ["move", "Bewegung"]]);
+const restC = el(st, "circle", { cx: XC, cy: YC, r: RC, fill: "none", stroke: "#9AA0A6", "stroke-width": 3, "stroke-dasharray": "8 7" });
+const mvArr = el(st, "path", { fill: "#595B60" });
+
+/* ================= Bewegung des Leiters (gedämpfte Schaukel) ================= */
+let dx = 0, vx = 0, fieldKey = "", hiKey = "", grid = { key: "" };
+/* Rasterwerte von A = −B0·u − K·G für das ganze Feldfenster auf einmal (gleiche Formel wie F und G, aber schneller:
+   exp hängt nur von der Spalte ab, cos und sin nur von der Zeile – pro Punkt bleibt ein Logarithmus) */
+function fieldGrid(p, xc, lift, y0, y1, h, key) {
+  const nx = Math.ceil((PX1 - PX0) / h), ny = Math.ceil((y1 - y0) / h), W = nx + 1, V = new Float64Array(W * (ny + 1));
+  const k = PI / (2 * HG), a0 = k * (lift + HG), c0 = Math.cos(a0), s0 = Math.sin(a0);
+  const mC = new Float64Array(W), bC = new Float64Array(W), uC = new Float64Array(W);
+  for (let i = 0; i <= nx; i++) { const x = PX0 + i * h; uC[i] = x - xc; mC[i] = Math.exp(k * uC[i]); bC[i] = -p.B0 * (x - XC); }
+  for (let j = 0; j <= ny; j++) {
+    const v = YC - (y0 + j * h), row = j * W;
+    if (p.K === 0) { for (let i = 0; i <= nx; i++) V[row + i] = bC[i]; continue; }
+    if (p.only) { for (let i = 0; i <= nx; i++) V[row + i] = bC[i] - p.K * Math.log(Math.max(4, Math.hypot(uC[i], v - lift)) / R0); continue; }
+    const a = k * (v + HG), ca = Math.cos(a), sa = Math.sin(a);
+    for (let i = 0; i <= nx; i++) {
+      const m = mC[i], zr = m * ca - c0, zi = m * sa, q = zr * zr;
+      V[row + i] = bC[i] - p.K * 0.5 * Math.log(Math.max(1e-6, (q + (zi - s0) * (zi - s0)) / (q + (zi + s0) * (zi + s0))));
+    }
+  }
+  return { key, V, nx, ny };
+}
+const WS = 2 * PI / 2.2, ZS = 0.35;
+const A = {
+  reset() { dx = 0; vx = 0; },
+  step(t, h) {
+    if (t < 27) { dx = 0; vx = 0; return; }          // bis Schritt 5 wird der Leiter festgehalten
+    const p = params(t), target = 160 * (-p.K / KM) * p.B0;
+    vx += (-WS * WS * (dx - target) - 2 * ZS * WS * vx) * h; dx += vx * h;
+  },
+  draw(t) {
+    const p = params(t), xc = XC + dx, s = -p.K / KM;   // s > 0: Strom hinein (⊗), Kraft nach rechts
+    const lift = LW - Math.sqrt(LW * LW - dx * dx), yc = YC - lift;   // Schaukel: Leiter läuft auf einem Kreisbogen
+    const F = (x, y) => -p.B0 * (x - XC) - p.K * G(x - xc, YC - y, p.only, lift);   // homogener Anteil ortsfest, Leiteranteil wandert mit
+    fieldG.setAttribute("clip-path", p.only ? "url(#cpPanel)" : "url(#cpField)");
+    fieldG.style.opacity = p.op; magG.style.opacity = p.mag; bLab.style.opacity = p.only ? 0 : p.op;
+    const y0 = p.only ? PY0 : FY0, y1 = p.only ? PY1 : FY1;
+    // Feldbild nur neu rechnen, wenn sich Feld oder Leiterlage geändert haben (in ruhigen Abschnitten spart das fast alles)
+    const key = `${p.B0}|${p.K.toFixed(3)}|${p.only}|${xc.toFixed(2)}|${lift.toFixed(3)}|${QUAL}`;
+    const h = 8 * QUAL;
+    if (key !== grid.key) grid = fieldGrid(p, xc, lift, y0, y1, h, key);
+    if (key !== fieldKey) {
+      fieldKey = key;
+      linesP.setAttribute("d", contourPath(null, PX0, y0, PX1, y1, h, LEVELS, grid.V));
+      // Feldpfeile: oben und unten quer durchs Bild; ohne Magnet senkrecht über dem Leiter (Kreise).
+      // Werte aus dem Raster (bilinear), damit die Spitzen genau auf den gezeichneten Linien sitzen und es schnell geht
+      const W = grid.nx + 1, GV = grid.V;
+      const Fg = (x, y) => {
+        const fi = Math.max(0, Math.min(grid.nx - 1e-9, (x - PX0) / h)), fj = Math.max(0, Math.min(grid.ny - 1e-9, (y - y0) / h));
+        const i = fi | 0, j = fj | 0, u = fi - i, v = fj - j, o = j * W + i;
+        return (GV[o] * (1 - u) + GV[o + 1] * u) * (1 - v) + (GV[o + W] * (1 - u) + GV[o + W + 1] * u) * v;
+      };
+      let hd = "";
+      const addHeads = list => { for (const [x, y] of list) { const bu = (Fg(x, y - 0.5) - Fg(x, y + 0.5)), bv = -(Fg(x + 0.5, y) - Fg(x - 0.5, y)); hd += headD(x, y, bu, -bv, 30, 24); } };
+      if (p.only) addHeads(crossings(Fg, [xc, yc - RC - 6], [xc, PY0 + 4], 400, LEVELS).concat(crossings(Fg, [xc, yc + RC + 6], [xc, PY1 - 4], 400, LEVELS)));
+      else for (const yy of [FY0 + 50, FY1 - 50]) addHeads(crossings(Fg, [PX0 + 6, yy], [PX1 - 6, yy], 500, LEVELS));
+      headsP.setAttribute("d", hd);
+    }
+    // gedehnte Linien hervorheben (Schritt 4 und 5)
+    const hiA = t >= 20 && t < 41 ? clamp01(Math.abs(s) * 1.4 - 0.4) * Math.min(clamp01((t - 20) / 0.6), clamp01((41 - t) / 0.6)) : 0;
+    hiP.style.opacity = hiA;
+    if (hiA > 0.01 && key !== hiKey) {
+      hiKey = key;
+      const sg = Math.sign(s) || 1, a1 = F(xc - sg * 40, yc), a2 = F(xc - sg * 130, yc);
+      const lv = LEVELS.filter(L => L > Math.min(a1, a2) && L < Math.max(a1, a2));
+      // Ausschnitt ±330 px um den Leiter aus dem schon berechneten Raster
+      const i0 = Math.max(0, Math.floor((xc - 330 - PX0) / h)), i1 = Math.min(grid.nx, Math.ceil((xc + 330 - PX0) / h)), n = i1 - i0, W = grid.nx + 1;
+      const sub = new Float64Array((n + 1) * (grid.ny + 1));
+      for (let j = 0; j <= grid.ny; j++) for (let i = 0; i <= n; i++) sub[j * (n + 1) + i] = grid.V[j * W + i0 + i];
+      hiP.setAttribute("d", contourPath(null, PX0 + i0 * h, y0, PX0 + (i0 + n - 0.001) * h, y1, h, lv, sub));
+    }
+    // Ruhelage und Bewegungspfeil (grau)
+    const away = clamp01((Math.abs(dx) - 8) / 20);
+    restC.style.opacity = away * (p.only ? 0 : 1);
+    const sp = Math.abs(vx);
+    mvArr.style.opacity = clamp01((sp - 15) / 30);
+    if (sp > 15) { const L = Math.min(150, 30 + sp * 0.5), sg = Math.sign(vx); mvArr.setAttribute("d", arrowD(xc - sg * L / 2, YC + 92, xc + sg * L / 2, YC + 92, 9, 30, 28)); }
+    // Aufhängung und Halter (Halter ab Schritt 3, beim Loslassen fährt er nach unten weg)
+    wire.setAttribute("x1", f1(xc)); wire.setAttribute("y1", f1(yc));
+    const rel = clamp01((t - 27) / 0.7);
+    holdG.style.opacity = t < 13 ? 0 : Math.min(clamp01((t - 13) / 0.6), 1 - rel);
+    holdG.setAttribute("transform", `translate(${f1(xc)} ${f1(yc + 160 * rel * rel)})`);
+    // Leiter mit Stromsymbol
+    condG.setAttribute("transform", `translate(${f1(xc)} ${f1(yc)})`);
+    const on = Math.abs(s) > 0.03;
+    condIn.style.opacity = on ? 1 : 0;
+    condSym.setAttribute("d", on && s > 0 ? crossD(0, 0, RC - 9) : ""); condDot.style.opacity = on && s < 0 ? 1 : 0;
+    iLab.setAttribute("x", f1(xc - 64)); iLab.setAttribute("y", f1(yc - 46)); iLab.style.opacity = on ? 1 : 0;
+    // Kraft F = I·l × B: proportional zu Strom und Magnetfeld
+    const fl = 230 * Math.abs(s) * p.B0 * clamp01((t - 20) / 0.6);   // Kraftpfeil ab Schritt 4
+    fArr.style.opacity = fLab.style.opacity = fl > 8 ? 1 : 0;
+    if (fl > 8) {
+      const sg = Math.sign(s);
+      fArr.setAttribute("d", arrowD(xc + sg * (RC + 10), yc, xc + sg * (RC + 10 + fl), yc, 16, 52, 48));
+      fLab.setAttribute("x", f1(xc + sg * (RC + 10 + fl * 0.55))); fLab.setAttribute("y", f1(yc - 40));
+    }
+    // Gegenkraft: bis zum Loslassen vom Halter (so groß wie F), danach von der Schaukel, proportional zur Auslenkung
+    // (in der Ruhelage dx = 160 · s ist sie wieder so groß wie F). Zeigt sie kurz in dieselbe Richtung wie F, rückt sie nach unten.
+    const gl = t < 27 ? fl : 230 / 160 * Math.abs(dx), gs = t < 27 ? -Math.sign(s) : -Math.sign(dx);
+    const same = fl > 8 && gs === Math.sign(s);
+    gArr.style.opacity = gl > 8 ? 1 : 0;
+    gLab.style.opacity = gl > 60 && !same ? 1 : 0;
+    if (gl > 8) {
+      const gy = yc + (same ? 56 * clamp01(fl / 60) : 0);
+      gArr.setAttribute("d", arrowD(xc + gs * (RC + 10), gy, xc + gs * (RC + 10 + gl), gy, 12, 44, 40));
+      gLab.setAttribute("x", f1(xc + gs * (RC + 10 + gl * 0.5))); gLab.setAttribute("y", f1(gy + 66));   // unter dem Pfeil, oben steht das I
+    }
+    // Gummiband (Steinschleuder): Band bleibt an den Stiften, der Leiter drückt hinein
+    sling.style.opacity = t < 13 ? 0 : clamp01((t - 13.5) / 0.6);
+    const bx = SX - 120 * s, side = Math.sign(s);
+    const xm = Math.abs(s) < 0.02 ? SX : bx - side * 27, cx = 2 * xm - SX;
+    band.setAttribute("d", `M${SX},${SY0}Q${f1(cx)},${SYM} ${SX},${SY1}`);
+    ball.setAttribute("transform", `translate(${f1(bx)} ${SYM})`);
+    ballSym.setAttribute("d", on && s > 0 ? crossD(0, 0, 18) : ""); ballDot.style.opacity = on && s < 0 ? 1 : 0;
+    const sl = 150 * Math.abs(s) * clamp01((t - 20) / 0.6);
+    sF.style.opacity = sl > 8 ? 1 : 0;
+    if (sl > 8) sF.setAttribute("d", arrowD(bx + side * 34, SYM, bx + side * (34 + sl), SYM, 12, 40, 36));
+    slingTxt.style.opacity = Math.abs(s) > 0.3 ? 1 : 0;
+  }
+};
+
+/* ================= Abspielen =================
+   Allein geöffnet: Endlosschleife. Mit ?tv (eingebettet in tv.html) steuert die Playlist:
+   Befehle {cmd: "seek", t, play}, {cmd: "play"}, {cmd: "pause"}; die Animation meldet „ready“ (Dauer und Schritte),
+   beim Abspielen laufend „time“ und am Ende „done“ und bleibt dann auf dem letzten Bild stehen.
+   ?t=12 startet bei Sekunde 12, ?t=12&shot zeigt ein Standbild. */
+const Q = new URLSearchParams(location.search);
+const TVMODE = Q.has("tv");
+let T = 0, paused = Q.has("pause") || Q.has("shot") || TVMODE, last = null, capIdx = -1, dirty = true;
+if (Q.has("shot")) document.body.classList.add("shot");
+if (TVMODE) document.body.classList.add("tv");
+const tell = m => { if (TVMODE) { try { parent.postMessage(m, "*"); } catch (e) {} } };
+function phaseAt(t) { let i = 0; while (i + 1 < PH.length && t >= PH[i + 1].t) i++; return i; }
+const STEP = 1 / 240;
+function stepTo(t) { while (T < t - 1e-9) { const d = Math.min(STEP, t - T); A.step(T, d); T += d; } T = t; }
+/* Springen: vorwärts ab der aktuellen Zeit weiterrechnen, rückwärts von vorn */
+function seek(t) { if (t < T) { A.reset(); T = 0; } stepTo(t); dirty = true; }
+function advance(dt) {
+  const target = T + dt;
+  if (target >= LOOP) {
+    if (TVMODE) { stepTo(LOOP - 0.001); setPaused(true); dirty = true; tell({ tv: "done" }); return; }
+    A.reset(); T = 0; stepTo(target - LOOP); return;
+  }
+  stepTo(target);
+}
+const capN = $("capn"), capT = $("capt"), progbar = $("progbar");
+function caption(i, instant) {
+  if (i === capIdx) return; capIdx = i;
+  const set = () => { capN.textContent = i + 1; capT.textContent = PH[i].txt; capT.style.opacity = 1; };
+  if (instant) set(); else { capT.style.opacity = 0; setTimeout(set, 250); }
+}
+PH.slice(1).forEach(p => el($("progticks"), "rect", { x: f1(60 + 1800 * p.t / LOOP - 2), y: 1060, width: 4, height: 8, fill: "#fff" }));
+/* Rechenzeit pro Bild beobachten: Ist das Gerät zu langsam (über 22 ms), wird das Rechenraster gröber (QUAL bis 2),
+   bei viel Reserve (unter 7 ms) wieder feiner. Bilder ohne Neuberechnung (unter 2 ms) zählen nicht.
+   Auf einem normalen PC bleibt QUAL = 1. */
+let cost = 0, costN = 0;
+function measure(ms) {
+  if (paused || ms < 2) return;
+  cost = costN < 6 ? (cost * costN + ms) / (costN + 1) : cost * 0.85 + ms * 0.15; costN++;
+  if (costN < 8) return;
+  if (cost > 22 && QUAL < 2) { QUAL = Math.min(2, QUAL * 1.25); costN = 0; }
+  else if (cost < 7 && QUAL > 1) { QUAL = Math.max(1, QUAL / 1.25); costN = 0; }
+}
+function render(instant) {
+  caption(phaseAt(T), instant); progbar.setAttribute("width", f1(1800 * T / LOOP));
+  const a = performance.now(); A.draw(T); measure(performance.now() - a); dirty = false;
+}
+function frame(now) {
+  if (last != null && !paused) advance(Math.min(0.25, (now - last) / 1000));
+  last = now;
+  if (!paused || dirty) { render(false); if (!paused) tell({ tv: "time", t: T }); }
+  requestAnimationFrame(frame);
+}
+function setPaused(p) { paused = p; document.body.classList.toggle("paused", p); }
+function jump(k) { const i = (phaseAt(T) + k + PH.length) % PH.length; seek(PH[i].t); render(true); }
+function key(k) {
+  if (k === " " || k === "Enter") setPaused(!paused);
+  else if (k === "ArrowRight") jump(1);
+  else if (k === "ArrowLeft") jump(-1);
+}
+addEventListener("keydown", e => {
+  if (TVMODE) { tell({ tv: "key", key: e.key, code: e.keyCode }); e.preventDefault(); return; }
+  if (e.key === "f" || e.key === "F") { const d = document.documentElement; if (!document.fullscreenElement && d.requestFullscreen) d.requestFullscreen().catch(() => {}); else if (document.exitFullscreen) document.exitFullscreen(); return; }
+  key(e.key); if (e.key === " ") e.preventDefault();
+});
+addEventListener("click", () => { if (TVMODE) tell({ tv: "key", key: " " }); else setPaused(!paused); });
+addEventListener("message", e => {
+  const m = e.data || {};
+  if (m.cmd === "pause") setPaused(true);
+  else if (m.cmd === "play") { if (T >= LOOP - 0.01) { seek(0); render(true); } setPaused(false); }
+  else if (m.cmd === "seek") {
+    seek(Math.max(0, Math.min(LOOP - 0.001, +m.t || 0))); render(true); tell({ tv: "time", t: T });
+    if (m.play != null) setPaused(!m.play);
+  }
+  else if (m.cmd === "step") jump(m.dir || 1);
+});
+/* Mauszeiger nach 2 s ohne Bewegung ausblenden */
+let idleT = null;
+addEventListener("mousemove", () => { document.body.classList.remove("idle"); clearTimeout(idleT); idleT = setTimeout(() => document.body.classList.add("idle"), 2000); });
+document.body.classList.add("idle");
+/* Bildschirm wach halten, wo der Browser es erlaubt */
+async function keepAwake() { try { if (!TVMODE && "wakeLock" in navigator && document.visibilityState === "visible") await navigator.wakeLock.request("screen"); } catch (e) {} }
+document.addEventListener("visibilitychange", keepAwake); keepAwake();
+/* grünes Quadrat vor „HTL St. Pölten“ */
+try { const b = $("brand").getComputedTextLength(); $("brandSq").setAttribute("x", f1(1860 - b - 44)); } catch (e) {}
+
+seek(Math.max(0, Math.min(LOOP - 0.001, parseFloat(Q.get("t")) || 0)));
+setPaused(paused);
+render(true);
+tell({ tv: "ready", loop: LOOP, ph: PH.map(p => p.t) });
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
